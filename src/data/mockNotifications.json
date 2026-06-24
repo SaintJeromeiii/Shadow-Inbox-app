@@ -1,0 +1,107 @@
+[
+  {
+    "id": "notif-001",
+    "sourceApp": "Email",
+    "sender": "sarah.chen@acmecorp.com",
+    "rawText": "Re: Re: Re: Q3 roadmap sync — hi team sorry for the wall of text but wanted to loop everyone in before thursday. ACTION ITEM (buried lol): please review the attached deck v7_FINAL_revised(2).pptx and leave comments on slides 14-18 re: the API deprecation timeline. also @jerome can you confirm whether we're still targeting oct 15 for the shadow inbox beta? legal needs an answer by EOD wednesday. thx!!\n\n--\nSarah Chen | PM, Platform\nSent from my iPhone",
+    "timestamp": "2026-06-24T06:42:00-07:00"
+  },
+  {
+    "id": "notif-002",
+    "sourceApp": "Slack",
+    "sender": "#eng-backend",
+    "rawText": "random but does anyone know why staging is slow today??",
+    "timestamp": "2026-06-24T06:51:00-07:00"
+  },
+  {
+    "id": "notif-003",
+    "sourceApp": "Slack",
+    "sender": "@mike.ross in #pr-reviews",
+    "rawText": "@jerome hey when you get a sec can you review PR #847? it's the notification batching refactor — blocking the release train. no rush but also kinda urgent 😅",
+    "timestamp": "2026-06-24T07:03:00-07:00"
+  },
+  {
+    "id": "notif-004",
+    "sourceApp": "Discord",
+    "sender": "React Native Community",
+    "rawText": "**ServerMod**: Reminder that Expo SDK 56 migration office hours are today at 2pm PT in #help. Bring your app.json questions!",
+    "timestamp": "2026-06-24T07:08:00-07:00"
+  },
+  {
+    "id": "notif-005",
+    "sourceApp": "Discord",
+    "sender": "DM from pixelPioneer",
+    "rawText": "yo saw your shadow inbox concept on twitter — are you open sourcing the triage layer? would love to collab on a plugin for Linear",
+    "timestamp": "2026-06-24T07:15:00-07:00"
+  },
+  {
+    "id": "notif-006",
+    "sourceApp": "SMS",
+    "sender": "Mom",
+    "rawText": "Dad's flight lands 4:45 at SFO terminal 2. Can u pick him up or should I call an uber? Also did u remember to sign the insurance form I emailed??",
+    "timestamp": "2026-06-24T07:22:00-07:00"
+  },
+  {
+    "id": "notif-007",
+    "sourceApp": "WhatsApp",
+    "sender": "Apartment Group",
+    "rawText": "🗳️ POLL: Trash pickup moved to FRIDAY this week due to holiday. React with 👍 if you can take bins out Thursday night.",
+    "timestamp": "2026-06-24T07:28:00-07:00"
+  },
+  {
+    "id": "notif-008",
+    "sourceApp": "Email",
+    "sender": "noreply@stripe.com",
+    "rawText": "Your Stripe verification code is 482913. This code expires in 10 minutes. If you didn't request this, ignore this email.",
+    "timestamp": "2026-06-24T07:31:00-07:00"
+  },
+  {
+    "id": "notif-009",
+    "sourceApp": "Slack",
+    "sender": "@dana in #design",
+    "rawText": "dropped the dark mode mocks in figma — no action needed unless you hate them lol. link: https://figma.com/file/shadow-inbox-v2",
+    "timestamp": "2026-06-24T07:35:00-07:00"
+  },
+  {
+    "id": "notif-010",
+    "sourceApp": "Email",
+    "sender": "calendar-notification@google.com",
+    "rawText": "Updated invitation: Weekly 1:1 with Alex @ Wed Jun 25, 2026 10am–10:30am (PDT)\n\nThis event has been moved from 9am.\n\nGoing? Yes | No | Maybe",
+    "timestamp": "2026-06-24T07:40:00-07:00"
+  },
+  {
+    "id": "notif-011",
+    "sourceApp": "WhatsApp",
+    "sender": "Unknown (+1 628-555-0142)",
+    "rawText": "Your WhatsApp account is being registered on a new device. Your verification code: 739201. Do not share this code.",
+    "timestamp": "2026-06-24T07:44:00-07:00"
+  },
+  {
+    "id": "notif-012",
+    "sourceApp": "Email",
+    "sender": "benefits@company.hr",
+    "rawText": "Open Enrollment ends Friday 6/27. You have not completed your elections. ACTION REQUIRED: Log in to Workday and select your 2026 medical plan. Failure to enroll will default you to the HDHP plan.",
+    "timestamp": "2026-06-24T07:50:00-07:00"
+  },
+  {
+    "id": "notif-013",
+    "sourceApp": "Slack",
+    "sender": "#random",
+    "rawText": "whoever left oat milk in the fridge with ONE sip left… we need to talk",
+    "timestamp": "2026-06-24T07:55:00-07:00"
+  },
+  {
+    "id": "notif-014",
+    "sourceApp": "Discord",
+    "sender": "DM from synthwaveCoder",
+    "rawText": "btw your last commit broke my local build — `triageService.ts` import path? might just be me but lmk",
+    "timestamp": "2026-06-24T08:01:00-07:00"
+  },
+  {
+    "id": "notif-015",
+    "sourceApp": "SMS",
+    "sender": "Amazon",
+    "rawText": "Amazon: Your package with USB-C hub will arrive today by 8pm. Track: https://a.co/d/abc123 Reply STOP to opt out",
+    "timestamp": "2026-06-24T08:05:00-07:00"
+  }
+]

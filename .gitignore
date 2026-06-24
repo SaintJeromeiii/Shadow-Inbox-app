@@ -31,7 +31,11 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
 .env*.local
+
+# locally fetched inbox data (contains personal emails)
+src/data/realNotifications.json
 
 # typescript
 *.tsbuildinfo
