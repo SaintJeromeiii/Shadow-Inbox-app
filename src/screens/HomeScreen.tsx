@@ -25,8 +25,9 @@ import { fetchInboxFromRelay } from '../services/inboxService';
 import {
   loadPersistedNotifications,
   saveNotifications,
+  clearPersistedNotifications,
 } from '../services/notificationStorage';
-import { sendReply, archiveEmails, trashEmails } from '../services/emailService';
+import { sendReply, archiveEmails, trashEmails, syncShadowLabels } from '../services/emailService';
 import {
   alertNewActionRequiredItems,
   loadAlertedActionIds,
@@ -34,9 +35,17 @@ import {
 } from '../services/pushNotifications';
 import { useAccount } from '../context/AccountContext';
 import AccountSwitcherSheet from '../components/AccountSwitcherSheet';
+import BriefingCard from '../components/BriefingCard';
 import { useGoogleSignIn } from '../hooks/useGoogleSignIn';
+import { removeRelayAccount } from '../services/authService';
+import {
+  dismissBriefingForToday,
+  fetchDailyBriefing,
+  isBriefingDismissedForToday,
+} from '../services/briefingService';
 import type { AccountKey } from '../types/account';
 import type { AccountProfile } from '../types/account';
+import type { DailyBriefing } from '../types/briefing';
 import type { FeedTab, TriagedNotification } from '../types/notification';
 
 const TABS: { key: FeedTab; label: string }[] = [
@@ -115,6 +124,11 @@ export default function HomeScreen() {
   const [removingIds, setRemovingIds] = useState<Set<string>>(new Set());
   const [bulkSending, setBulkSending] = useState(false);
   const [accountSheetVisible, setAccountSheetVisible] = useState(false);
+  const [removingAccountKey, setRemovingAccountKey] = useState<AccountKey | null>(null);
+  const [briefing, setBriefing] = useState<DailyBriefing | null>(null);
+  const [briefingLoading, setBriefingLoading] = useState(false);
+  const [briefingError, setBriefingError] = useState<string | null>(null);
+  const [briefingHidden, setBriefingHidden] = useState(false);
   const skipNextSave = useRef(true);
   const alertedActionIdsRef = useRef<Set<string>>(new Set());
   const loadingAccountRef = useRef<AccountKey | null>(null);
@@ -201,8 +215,10 @@ export default function HomeScreen() {
   );
 
   const applyInboxReload = useCallback(
-    async (accountKey: AccountKey, sync = true) => {
-      if (loadingAccountRef.current === accountKey) return;
+    async (accountKey: AccountKey, sync = true): Promise<TriagedNotification[]> => {
+      if (loadingAccountRef.current === accountKey) {
+        return notifications;
+      }
       loadingAccountRef.current = accountKey;
 
       try {
@@ -215,19 +231,83 @@ export default function HomeScreen() {
         setProgress(null);
         setLastUpdated(new Date());
         setHydrated(true);
+        return merged;
       } finally {
         loadingAccountRef.current = null;
       }
     },
-    [reloadInboxFromSource],
+    [notifications, reloadInboxFromSource],
+  );
+
+  const gatherTriageSnapshot = useCallback(
+    async (
+      activeNotifications?: TriagedNotification[],
+    ): Promise<Record<AccountKey, TriagedNotification[]>> => {
+      const snapshot: Record<AccountKey, TriagedNotification[]> = {};
+
+      for (const account of accounts) {
+        if (activeNotifications && account.key === activeAccount) {
+          snapshot[account.key] = activeNotifications;
+          continue;
+        }
+
+        snapshot[account.key] = await loadPersistedNotifications(account.key);
+      }
+
+      return snapshot;
+    },
+    [accounts, activeAccount],
+  );
+
+  const refreshBriefing = useCallback(
+    async (activeNotifications?: TriagedNotification[]) => {
+      const dismissed = await isBriefingDismissedForToday();
+      if (dismissed) {
+        setBriefingHidden(true);
+        return;
+      }
+
+      setBriefingHidden(false);
+      setBriefingLoading(true);
+      setBriefingError(null);
+
+      try {
+        const triageByAccount = await gatherTriageSnapshot(activeNotifications);
+        const result = await fetchDailyBriefing(triageByAccount);
+        setBriefing(result);
+      } catch (error) {
+        console.warn('[Shadow Inbox] Briefing fetch failed:', error);
+        setBriefingError(
+          error instanceof Error
+            ? error.message
+            : 'Could not load your morning briefing.',
+        );
+      } finally {
+        setBriefingLoading(false);
+      }
+    },
+    [gatherTriageSnapshot],
   );
 
   useEffect(() => {
     if (!accountReady) return;
-    void applyInboxReload(activeAccount, false);
+
+    void (async () => {
+      const dismissed = await isBriefingDismissedForToday();
+      setBriefingHidden(dismissed);
+      const merged = await applyInboxReload(activeAccount, false);
+      if (!dismissed) {
+        await refreshBriefing(merged);
+      }
+    })();
     // Initial inbox load only — account switches reload via handleSelectAccount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountReady]);
+
+  const handleDismissBriefing = useCallback(async () => {
+    await dismissBriefingForToday();
+    setBriefingHidden(true);
+  }, []);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -243,11 +323,12 @@ export default function HomeScreen() {
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await applyInboxReload(activeAccount, true);
+      const merged = await applyInboxReload(activeAccount, true);
+      await refreshBriefing(merged);
     } finally {
       setRefreshing(false);
     }
-  }, [activeAccount, applyInboxReload]);
+  }, [activeAccount, applyInboxReload, refreshBriefing]);
 
   const handleSelectAccount = useCallback(
     async (accountKey: AccountKey) => {
@@ -257,12 +338,13 @@ export default function HomeScreen() {
       await setActiveAccount(accountKey);
       setRefreshing(true);
       try {
-        await applyInboxReload(accountKey, true);
+        const merged = await applyInboxReload(accountKey, true);
+        await refreshBriefing(merged);
       } finally {
         setRefreshing(false);
       }
     },
-    [activeAccount, applyInboxReload, setActiveAccount],
+    [activeAccount, applyInboxReload, refreshBriefing, setActiveAccount],
   );
 
   const handleGoogleAccountLinked = useCallback(
@@ -272,12 +354,79 @@ export default function HomeScreen() {
       await setActiveAccount(account.key);
       setRefreshing(true);
       try {
-        await applyInboxReload(account.key, true);
+        const merged = await applyInboxReload(account.key, true);
+        await refreshBriefing(merged);
       } finally {
         setRefreshing(false);
       }
     },
-    [applyInboxReload, refreshAccounts, setActiveAccount],
+    [applyInboxReload, refreshAccounts, refreshBriefing, setActiveAccount],
+  );
+
+  const handleRemoveAccount = useCallback(
+    (account: AccountProfile) => {
+      if (!account.oauth) return;
+
+      Alert.alert(
+        'Remove Google Account',
+        `Disconnect ${account.email} from Shadow Inbox? This removes stored OAuth tokens and the local feed on your Mac relay.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Remove',
+            style: 'destructive',
+            onPress: () => {
+              void (async () => {
+                setRemovingAccountKey(account.key);
+                try {
+                  const result = await removeRelayAccount(account.key);
+                  if (!result.success) {
+                    Alert.alert(
+                      'Remove Failed',
+                      result.error ?? 'Could not remove this account from the relay.',
+                    );
+                    return;
+                  }
+
+                  await clearPersistedNotifications(account.key);
+                  await refreshAccounts();
+                  setAccountSheetVisible(false);
+
+                  if (activeAccount === account.key) {
+                    await setActiveAccount('personal');
+                    setRefreshing(true);
+                    try {
+                      const merged = await applyInboxReload('personal', false);
+                      await refreshBriefing(merged);
+                    } finally {
+                      setRefreshing(false);
+                    }
+                  } else {
+                    await refreshBriefing();
+                  }
+                } catch (error) {
+                  Alert.alert(
+                    'Remove Failed',
+                    error instanceof Error
+                      ? error.message
+                      : 'Could not remove this account.',
+                  );
+                } finally {
+                  setRemovingAccountKey(null);
+                }
+              })();
+            },
+          },
+        ],
+      );
+    },
+    [
+      activeAccount,
+      applyInboxReload,
+      refreshAccounts,
+      refreshBriefing,
+      setActiveAccount,
+    ],
   );
 
   const { signInWithGoogle, isSigningIn: isGoogleSigningIn } = useGoogleSignIn({
@@ -407,12 +556,29 @@ export default function HomeScreen() {
         setProgress(`${done} / ${total}`);
       });
 
-      setNotifications((prev) =>
-        prev.map((n) => {
+      setNotifications((prev) => {
+        const updated = prev.map((n) => {
           const triage = results.get(n.id);
           return triage ? { ...n, triage } : n;
-        }),
-      );
+        });
+
+        void syncShadowLabels(updated).then((labelResult) => {
+          if (!labelResult.success || !labelResult.updated?.length) {
+            return;
+          }
+
+          const labelById = new Map(labelResult.updated.map((item) => [item.id, item]));
+          setNotifications((current) =>
+            current.map((item) => {
+              const labeled = labelById.get(item.id);
+              return labeled ? { ...item, ...labeled } : item;
+            }),
+          );
+        });
+
+        void refreshBriefing(updated);
+        return updated;
+      });
       setDraftTexts((prev) => {
         const next = { ...prev };
         for (const [id, triage] of results.entries()) {
@@ -426,7 +592,7 @@ export default function HomeScreen() {
       setProcessing(false);
       setProgress(null);
     }
-  }, [notifications]);
+  }, [notifications, refreshBriefing]);
 
   const handleSendReply = useCallback(
     async (notification: TriagedNotification, replyText: string) => {
@@ -648,6 +814,8 @@ export default function HomeScreen() {
         activeAccount={activeAccount}
         onSelect={(accountKey) => void handleSelectAccount(accountKey)}
         onAddGoogle={() => void signInWithGoogle()}
+        onRemove={handleRemoveAccount}
+        removingAccountKey={removingAccountKey}
         isAddingGoogle={isGoogleSigningIn}
         onClose={() => setAccountSheetVisible(false)}
       />
@@ -674,6 +842,15 @@ export default function HomeScreen() {
             </View>
           </Pressable>
         </View>
+      )}
+
+      {!briefingHidden && (
+        <BriefingCard
+          briefing={briefing}
+          loading={briefingLoading}
+          error={briefingError}
+          onDismiss={() => void handleDismissBriefing()}
+        />
       )}
 
       <View style={styles.tabBar}>

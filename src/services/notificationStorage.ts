@@ -34,6 +34,12 @@ export async function saveNotifications(
   await AsyncStorage.setItem(storageKey(accountKey), JSON.stringify(notifications));
 }
 
+export async function clearPersistedNotifications(
+  accountKey: AccountKey,
+): Promise<void> {
+  await AsyncStorage.removeItem(storageKey(accountKey));
+}
+
 function mergeWithSeed(
   seed: RawNotification[],
   persisted: TriagedNotification[],
@@ -48,8 +54,11 @@ function mergeWithSeed(
 
     return {
       ...seedItem,
-      triage: saved.triage,
+      triage: saved.triage ?? seedItem.triage,
       archived: saved.archived,
+      shadowLabels: saved.shadowLabels ?? seedItem.shadowLabels,
+      gmailMessageId: saved.gmailMessageId ?? seedItem.gmailMessageId,
+      messageIdHeader: saved.messageIdHeader ?? seedItem.messageIdHeader,
     };
   });
 }

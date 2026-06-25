@@ -11,6 +11,14 @@ export interface RawNotification {
   sender: string;
   rawText: string;
   timestamp: string;
+  messageIdHeader?: string | null;
+  gmailMessageId?: string | null;
+  shadowLabels?: ShadowLabel[];
+}
+
+export interface ShadowLabel {
+  key: string;
+  name: string;
 }
 
 export type TriageCategory = 'action_required' | 'fyi' | 'ignore';

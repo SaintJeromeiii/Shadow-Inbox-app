@@ -1,4 +1,5 @@
 const { withInbox } = require('./imapAuth');
+const { removeShadowLabelsFromNotifications } = require('./shadowLabels');
 
 /**
  * Gmail archive/trash via IMAP per account.
@@ -54,8 +55,16 @@ function extractUids(ids) {
   return { uids, unsupported, parsed };
 }
 
-async function archiveMessages(accountKey, ids) {
+async function archiveMessages(accountKey, ids, notifications = []) {
   const { uids, unsupported } = extractUids(ids);
+
+  if (notifications.length > 0) {
+    try {
+      await removeShadowLabelsFromNotifications(accountKey, notifications);
+    } catch (error) {
+      console.warn(`[${accountKey}] Could not remove Shadow labels before archive:`, error.message);
+    }
+  }
 
   if (uids.length === 0) {
     return { archived: 0, unsupported };
@@ -68,8 +77,16 @@ async function archiveMessages(accountKey, ids) {
   return { archived: result.moved, unsupported };
 }
 
-async function trashMessages(accountKey, ids) {
+async function trashMessages(accountKey, ids, notifications = []) {
   const { uids, unsupported } = extractUids(ids);
+
+  if (notifications.length > 0) {
+    try {
+      await removeShadowLabelsFromNotifications(accountKey, notifications);
+    } catch (error) {
+      console.warn(`[${accountKey}] Could not remove Shadow labels before trash:`, error.message);
+    }
+  }
 
   if (uids.length === 0) {
     return { trashed: 0, unsupported };

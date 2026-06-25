@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { DATA_DIR } = require('./accountsConstants');
 
 const TOKENS_PATH = path.join(__dirname, 'user_tokens.json');
 
@@ -21,25 +22,17 @@ function writeTokenStore(store) {
   fs.writeFileSync(TOKENS_PATH, `${JSON.stringify(store, null, 2)}\n`, 'utf8');
 }
 
+const {
+  initialsFromProfile,
+  collectUsedInitials,
+} = require('./accountInitials');
+
 function accountKeyFromEmail(email) {
   const slug = email
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '');
   return `google_${slug}`;
-}
-
-function initialsFromProfile(displayName, email) {
-  if (displayName?.trim()) {
-    const parts = displayName.trim().split(/\s+/);
-    if (parts.length >= 2) {
-      return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
-    }
-    return parts[0].slice(0, 2).toUpperCase();
-  }
-
-  const local = email.split('@')[0] ?? 'GO';
-  return local.slice(0, 2).toUpperCase();
 }
 
 function pickAccentColor(existingKeys) {
@@ -80,13 +73,14 @@ function upsertOAuthAccount({
   const accountKey = accountKeyFromEmail(email);
   const existing = store.accounts[accountKey];
   const expiresAt = Date.now() + Number(expiresIn || 3600) * 1000;
+  const usedInitials = collectUsedInitials(Object.values(store.accounts));
 
   const profile = {
     accountKey,
     email,
     displayName: displayName || email,
     label: `Google · ${email}`,
-    initials: initialsFromProfile(displayName, email),
+    initials: initialsFromProfile(displayName, email, usedInitials),
     accentColor: existing?.accentColor ?? pickAccentColor(Object.keys(store.accounts)),
     feedFile: feedFileForAccountKey(accountKey),
     accessToken,
@@ -127,16 +121,44 @@ function updateOAuthTokens(accountKey, { accessToken, refreshToken, expiresIn, s
 }
 
 function toPublicProfile(record) {
+  const store = readTokenStore();
+  const usedInitials = collectUsedInitials(
+    Object.values(store.accounts).filter((item) => item.accountKey !== record.accountKey),
+  );
+
   return {
     key: record.accountKey,
     label: record.label,
     email: record.email,
-    initials: record.initials,
+    initials: initialsFromProfile(record.displayName, record.email, usedInitials),
     accentColor: record.accentColor,
     oauth: true,
     mockOnly: false,
     imapConfigured: true,
   };
+}
+
+function removeOAuthAccount(accountKey) {
+  const store = readTokenStore();
+  const existing = store.accounts[accountKey];
+  if (!existing) {
+    return null;
+  }
+
+  if (existing.feedFile) {
+    const feedPath = path.join(DATA_DIR, existing.feedFile);
+    try {
+      if (fs.existsSync(feedPath)) {
+        fs.unlinkSync(feedPath);
+      }
+    } catch (error) {
+      console.warn(`[OAuth] Could not delete feed file for ${accountKey}:`, error);
+    }
+  }
+
+  delete store.accounts[accountKey];
+  writeTokenStore(store);
+  return existing;
 }
 
 module.exports = {
@@ -147,5 +169,6 @@ module.exports = {
   listOAuthAccounts,
   upsertOAuthAccount,
   updateOAuthTokens,
+  removeOAuthAccount,
   toPublicProfile,
 };

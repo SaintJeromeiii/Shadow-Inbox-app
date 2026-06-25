@@ -2,6 +2,12 @@ const Imap = require('imap');
 const { getAccount, resolveAccountKey } = require('./accounts');
 const { getValidAccessToken } = require('./googleOAuth');
 
+/** Gmail IMAP expects a base64 XOAUTH2 blob, not a raw bearer token. */
+function buildXOAuth2Token(user, accessToken) {
+  const authString = `user=${user}\x01auth=Bearer ${accessToken}\x01\x01`;
+  return Buffer.from(authString, 'utf8').toString('base64');
+}
+
 async function getImapConfigForAccount(accountKey) {
   const account = getAccount(resolveAccountKey(accountKey));
   if (!account) {
@@ -12,7 +18,7 @@ async function getImapConfigForAccount(accountKey) {
     const accessToken = await getValidAccessToken(account.key);
     return {
       user: account.email,
-      xoauth2: accessToken,
+      xoauth2: buildXOAuth2Token(account.email, accessToken),
       host: account.imap.host || 'imap.gmail.com',
       port: account.imap.port || 993,
     };
@@ -81,6 +87,7 @@ async function withInbox(accountKey, imapAction, readOnly = false) {
 }
 
 module.exports = {
+  buildXOAuth2Token,
   getImapConfigForAccount,
   createImapConnection,
   openInbox,

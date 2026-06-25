@@ -244,3 +244,62 @@ export async function archiveEmails(ids: string[]): Promise<GmailActionResult> {
 export async function trashEmails(ids: string[]): Promise<GmailActionResult> {
   return postGmailAction('trash', ids);
 }
+
+export async function syncShadowLabels(
+  notifications: TriagedNotification[],
+): Promise<{ success: boolean; updated?: TriagedNotification[]; error?: string }> {
+  const payload = notifications
+    .filter((item) => item.triage)
+    .map((item) => ({
+      id: item.id,
+      triage: item.triage,
+      messageIdHeader: item.messageIdHeader,
+      gmailMessageId: item.gmailMessageId,
+      shadowLabels: item.shadowLabels,
+    }));
+
+  if (payload.length === 0) {
+    return { success: true, updated: [] };
+  }
+
+  try {
+    const response = await fetchWithTimeout(
+      `${getRelayUrl()}/api/emails/sync-labels`,
+      {
+        method: 'POST',
+        headers: relayHeaders(),
+        body: JSON.stringify({ notifications: payload }),
+      },
+      REQUEST_TIMEOUT_MS,
+    );
+
+    if (!response.ok) {
+      let errorMessage = `Relay returned ${response.status}`;
+      try {
+        const errorBody = (await response.json()) as { error?: string };
+        if (errorBody.error) errorMessage = errorBody.error;
+      } catch {
+        const text = await response.text();
+        if (text) errorMessage = text;
+      }
+      return { success: false, error: errorMessage };
+    }
+
+    const data = (await response.json()) as {
+      notifications?: TriagedNotification[];
+    };
+
+    return {
+      success: true,
+      updated: data.notifications ?? [],
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : 'Could not sync Gmail labels with the relay.',
+    };
+  }
+}

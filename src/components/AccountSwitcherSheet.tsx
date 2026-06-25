@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import {
   Modal,
   View,
@@ -7,8 +8,9 @@ import {
   Animated,
   Dimensions,
   PanResponder,
+  ScrollView,
 } from 'react-native';
-import { useEffect, useRef } from 'react';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { maskEmail } from '../constants/accounts';
 import type { AccountKey, AccountProfile } from '../types/account';
@@ -21,6 +23,8 @@ interface AccountSwitcherSheetProps {
   activeAccount: AccountKey;
   onSelect: (accountKey: AccountKey) => void;
   onAddGoogle: () => void;
+  onRemove?: (account: AccountProfile) => void;
+  removingAccountKey?: AccountKey | null;
   isAddingGoogle?: boolean;
   onClose: () => void;
 }
@@ -31,9 +35,12 @@ export default function AccountSwitcherSheet({
   activeAccount,
   onSelect,
   onAddGoogle,
+  onRemove,
+  removingAccountKey = null,
   isAddingGoogle = false,
   onClose,
 }: AccountSwitcherSheetProps) {
+  const insets = useSafeAreaInsets();
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
 
   useEffect(() => {
@@ -78,47 +85,81 @@ export default function AccountSwitcherSheet({
       <View style={styles.overlay}>
         <Pressable style={styles.backdrop} onPress={onClose} />
         <Animated.View
-          style={[styles.sheet, { transform: [{ translateY: slideAnim }] }]}
+          style={[
+            styles.sheet,
+            {
+              paddingBottom: Math.max(insets.bottom, 16) + 24,
+              maxHeight: SCREEN_HEIGHT * 0.82,
+            },
+            { transform: [{ translateY: slideAnim }] },
+          ]}
           {...panResponder.panHandlers}
         >
           <View style={styles.handle} />
           <Text style={styles.title}>Switch Inbox</Text>
           <Text style={styles.subtitle}>Choose which account feed to triage</Text>
 
-          <View style={styles.accountList}>
+          <ScrollView
+            style={styles.accountScroll}
+            contentContainerStyle={styles.accountList}
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+          >
             {accounts.map((account) => {
               const selected = account.key === activeAccount;
+              const canRemove = Boolean(account.oauth && onRemove);
+              const isRemoving = removingAccountKey === account.key;
+
               return (
-                <Pressable
-                  key={account.key}
-                  style={({ pressed }) => [
-                    styles.accountRow,
-                    selected && styles.accountRowSelected,
-                    pressed && styles.accountRowPressed,
-                  ]}
-                  onPress={() => onSelect(account.key)}
-                >
-                  <View
-                    style={[
-                      styles.avatar,
-                      { backgroundColor: account.accentColor },
+                <View key={account.key} style={styles.accountRowWrap}>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.accountRow,
+                      selected && styles.accountRowSelected,
+                      pressed && styles.accountRowPressed,
                     ]}
+                    onPress={() => onSelect(account.key)}
                   >
-                    <Text style={styles.avatarText}>{account.initials}</Text>
-                  </View>
-                  <View style={styles.accountCopy}>
-                    <Text style={styles.accountLabel}>{account.label}</Text>
-                    <Text style={styles.accountEmail}>{maskEmail(account.email)}</Text>
-                  </View>
-                  {selected ? (
-                    <Ionicons name="checkmark-circle" size={22} color="#6EE7A0" />
-                  ) : (
-                    <Ionicons name="chevron-forward" size={18} color="#5C6478" />
-                  )}
-                </Pressable>
+                    <View
+                      style={[
+                        styles.avatar,
+                        { backgroundColor: account.accentColor },
+                      ]}
+                    >
+                      <Text style={styles.avatarText}>{account.initials}</Text>
+                    </View>
+                    <View style={styles.accountCopy}>
+                      <Text style={styles.accountLabel}>{account.label}</Text>
+                      <Text style={styles.accountEmail}>{maskEmail(account.email)}</Text>
+                    </View>
+                    {selected ? (
+                      <Ionicons name="checkmark-circle" size={22} color="#6EE7A0" />
+                    ) : (
+                      <Ionicons name="chevron-forward" size={18} color="#5C6478" />
+                    )}
+                  </Pressable>
+                  {canRemove ? (
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.removeButton,
+                        pressed && !isRemoving && styles.removeButtonPressed,
+                        isRemoving && styles.removeButtonDisabled,
+                      ]}
+                      onPress={() => onRemove(account)}
+                      disabled={isRemoving}
+                      accessibilityLabel={`Remove ${account.label}`}
+                    >
+                      {isRemoving ? (
+                        <Ionicons name="hourglass-outline" size={18} color="#FF8A8A" />
+                      ) : (
+                        <Ionicons name="trash-outline" size={18} color="#FF8A8A" />
+                      )}
+                    </Pressable>
+                  ) : null}
+                </View>
               );
             })}
-          </View>
+          </ScrollView>
 
           <Pressable
             style={({ pressed }) => [
@@ -157,7 +198,6 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 24,
     paddingHorizontal: 20,
     paddingTop: 12,
-    paddingBottom: 34,
     borderWidth: 1,
     borderColor: '#2A3142',
     borderBottomWidth: 0,
@@ -182,10 +222,20 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginBottom: 18,
   },
+  accountScroll: {
+    flexGrow: 0,
+  },
   accountList: {
     gap: 10,
+    paddingBottom: 8,
+  },
+  accountRowWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   accountRow: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
@@ -227,8 +277,24 @@ const styles = StyleSheet.create({
     color: '#8B93A8',
     fontSize: 13,
   },
+  removeButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 138, 138, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 138, 138, 0.22)',
+  },
+  removeButtonPressed: {
+    opacity: 0.85,
+  },
+  removeButtonDisabled: {
+    opacity: 0.55,
+  },
   addGoogleButton: {
-    marginTop: 16,
+    marginTop: 12,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',

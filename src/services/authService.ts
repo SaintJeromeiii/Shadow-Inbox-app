@@ -10,6 +10,30 @@ export interface GoogleAuthCallbackResult {
   error?: string;
 }
 
+async function parseRelayJson<T extends { error?: string }>(
+  response: Response,
+): Promise<T> {
+  const text = await response.text();
+
+  if (!text.trim()) {
+    if (!response.ok) {
+      throw new Error(`Relay error (${response.status})`);
+    }
+    return {} as T;
+  }
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    const preview = text.replace(/\s+/g, ' ').slice(0, 140);
+    throw new Error(
+      response.ok
+        ? 'Relay returned a non-JSON response. Restart npm run dev:backend on your Mac.'
+        : `Relay error (${response.status}): ${preview}`,
+    );
+  }
+}
+
 export async function fetchRelayAccounts(): Promise<AccountProfile[]> {
   const response = await fetch(`${getRelayUrl()}/api/accounts`, {
     method: 'GET',
@@ -19,8 +43,36 @@ export async function fetchRelayAccounts(): Promise<AccountProfile[]> {
     throw new Error(`Failed to load accounts (${response.status})`);
   }
 
-  const data = (await response.json()) as { accounts?: AccountProfile[] };
+  const data = await parseRelayJson<{ accounts?: AccountProfile[] }>(response);
   return data.accounts ?? [];
+}
+
+export async function removeRelayAccount(
+  accountKey: string,
+): Promise<{ success: boolean; accounts?: AccountProfile[]; error?: string }> {
+  const response = await fetch(`${getRelayUrl()}/api/accounts/remove`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ accountKey }),
+  });
+
+  const data = await parseRelayJson<{
+    success?: boolean;
+    accounts?: AccountProfile[];
+    error?: string;
+  }>(response);
+
+  if (!response.ok) {
+    return {
+      success: false,
+      error: data.error ?? `Failed to remove account (${response.status})`,
+    };
+  }
+
+  return {
+    success: true,
+    accounts: data.accounts,
+  };
 }
 
 export async function exchangeGoogleAuthCode(input: {
@@ -36,9 +88,9 @@ export async function exchangeGoogleAuthCode(input: {
     body: JSON.stringify(input),
   });
 
-  const data = (await response.json()) as GoogleAuthCallbackResult & {
-    error?: string;
-  };
+  const data = await parseRelayJson<GoogleAuthCallbackResult & { error?: string }>(
+    response,
+  );
 
   if (!response.ok) {
     return {

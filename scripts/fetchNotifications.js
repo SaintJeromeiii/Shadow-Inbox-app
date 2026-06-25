@@ -15,6 +15,7 @@ const { getAccount, resolveAccountKey } = require('../backend/accounts');
 const { readNotifications, writeNotifications } = require('../backend/notificationFeed');
 const { openInbox } = require('../backend/imapAuth');
 const { getImapConfigForAccount } = require('../backend/imapAuth');
+const { enrichNotifications } = require('../backend/notificationEnrichment');
 
 const MAX_UNREAD = 15;
 
@@ -93,9 +94,11 @@ function fetchMessages(imap, uids) {
     fetch.on('message', (msg) => {
       let buffer = '';
       let uid = null;
+      let gmailMsgId = null;
 
       msg.on('attributes', (attrs) => {
         uid = attrs.uid;
+        gmailMsgId = attrs['x-gm-msgid'] ? String(attrs['x-gm-msgid']) : null;
       });
 
       msg.on('body', (stream) => {
@@ -105,7 +108,7 @@ function fetchMessages(imap, uids) {
       });
 
       msg.once('end', () => {
-        messages.push({ uid, buffer });
+        messages.push({ uid, buffer, gmailMsgId });
       });
     });
 
@@ -114,7 +117,7 @@ function fetchMessages(imap, uids) {
   });
 }
 
-async function parseMessage(buffer, uid) {
+async function parseMessage(buffer, uid, meta = {}) {
   const parsed = await simpleParser(buffer);
   const subject = parsed.subject || '';
   const sender = formatSender(parsed.from);
@@ -127,6 +130,8 @@ async function parseMessage(buffer, uid) {
     sender,
     rawText: buildRawText(subject, body),
     timestamp,
+    messageIdHeader: parsed.messageId || null,
+    gmailMessageId: meta.gmailMsgId || null,
   };
 }
 
@@ -182,7 +187,9 @@ async function fetchNotifications(options = {}) {
 
     const notifications = [];
     for (const message of rawMessages) {
-      const notification = await parseMessage(message.buffer, message.uid);
+      const notification = await parseMessage(message.buffer, message.uid, {
+        gmailMsgId: message.gmailMsgId,
+      });
       notifications.push(notification);
     }
 
@@ -190,12 +197,14 @@ async function fetchNotifications(options = {}) {
       (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
     );
 
-    const newCount = notifications.filter((item) => !previousIds.has(item.id)).length;
-    writeNotifications(accountKey, notifications);
+    const existing = readNotifications(accountKey);
+    const enriched = await enrichNotifications(accountKey, notifications, existing);
+    const newCount = enriched.filter((item) => !previousIds.has(item.id)).length;
+    writeNotifications(accountKey, enriched);
 
     if (!silent) {
       console.log(
-        `[${accountKey}] Wrote ${notifications.length} notification(s) to ${account.feedFile}`,
+        `[${accountKey}] Wrote ${enriched.length} notification(s) to ${account.feedFile}`,
       );
     }
 
@@ -204,7 +213,7 @@ async function fetchNotifications(options = {}) {
       unreadTotal: unreadUids.length,
       fetchedCount: selectedUids.length,
       newCount,
-      writtenCount: notifications.length,
+      writtenCount: enriched.length,
       mockOnly: false,
       oauth: true,
     };
@@ -236,7 +245,9 @@ async function fetchNotifications(options = {}) {
 
   const notifications = [];
   for (const message of rawMessages) {
-    const notification = await parseMessage(message.buffer, message.uid);
+    const notification = await parseMessage(message.buffer, message.uid, {
+      gmailMsgId: message.gmailMsgId,
+    });
     notifications.push(notification);
   }
 
@@ -244,12 +255,14 @@ async function fetchNotifications(options = {}) {
     (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
   );
 
-  const newCount = notifications.filter((item) => !previousIds.has(item.id)).length;
-  writeNotifications(accountKey, notifications);
+  const existing = readNotifications(accountKey);
+  const enriched = await enrichNotifications(accountKey, notifications, existing);
+  const newCount = enriched.filter((item) => !previousIds.has(item.id)).length;
+  writeNotifications(accountKey, enriched);
 
   if (!silent) {
     console.log(
-      `[${accountKey}] Wrote ${notifications.length} notification(s) to ${account.feedFile}`,
+      `[${accountKey}] Wrote ${enriched.length} notification(s) to ${account.feedFile}`,
     );
   }
 
@@ -258,7 +271,7 @@ async function fetchNotifications(options = {}) {
     unreadTotal: unreadUids.length,
     fetchedCount: selectedUids.length,
     newCount,
-    writtenCount: notifications.length,
+    writtenCount: enriched.length,
     mockOnly: false,
   };
 }

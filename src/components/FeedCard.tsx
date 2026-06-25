@@ -14,6 +14,10 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import type { TriagedNotification } from '../types/notification';
 import { SOURCE_COLORS, SOURCE_LABELS } from '../constants/sourceStyles';
+import {
+  formatShadowLabelName,
+  SHADOW_LABEL_STYLES,
+} from '../constants/shadowLabels';
 
 interface FeedCardProps {
   notification: TriagedNotification;
@@ -104,6 +108,22 @@ export default function FeedCard({
   const replyInputRef = useRef<TextInput>(null);
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const triage = notification.triage;
+  const shadowLabels =
+    notification.shadowLabels && notification.shadowLabels.length > 0
+      ? notification.shadowLabels
+      : triage?.category
+        ? [
+            {
+              key: triage.category,
+              name:
+                triage.category === 'action_required'
+                  ? 'Shadow/Action-Required'
+                  : triage.category === 'fyi'
+                    ? 'Shadow/FYI'
+                    : 'Shadow/Newsletter',
+            },
+          ]
+        : [];
   const sourceColor = SOURCE_COLORS[notification.sourceApp];
   const isActionRequired = triage?.category === 'action_required';
   const isEmail = notification.sourceApp === 'Email';
@@ -180,11 +200,37 @@ export default function FeedCard({
       ]}
     >
       <View style={styles.cardTopRow}>
-        <View style={[styles.sourceTag, { backgroundColor: sourceColor }]}>
-          <Ionicons name="mail-outline" size={12} color="#FFFFFF" />
-          <Text style={styles.sourceTagText}>
-            {SOURCE_LABELS[notification.sourceApp]}
-          </Text>
+        <View style={styles.cardTopLeft}>
+          <View style={[styles.sourceTag, { backgroundColor: sourceColor }]}>
+            <Ionicons name="mail-outline" size={12} color="#FFFFFF" />
+            <Text style={styles.sourceTagText}>
+              {SOURCE_LABELS[notification.sourceApp]}
+            </Text>
+          </View>
+          {shadowLabels.length > 0 && (
+            <View style={styles.labelRow}>
+              {shadowLabels.map((label) => {
+                const style =
+                  SHADOW_LABEL_STYLES[label.key] ?? SHADOW_LABEL_STYLES.fyi;
+                return (
+                  <View
+                    key={`${notification.id}-${label.key}`}
+                    style={[
+                      styles.shadowLabelPill,
+                      {
+                        backgroundColor: style.backgroundColor,
+                        borderColor: style.borderColor,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.shadowLabelText, { color: style.textColor }]}>
+                      {formatShadowLabelName(label.name)}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          )}
         </View>
         {triage && (
           <View style={styles.urgencyWrap}>
@@ -377,8 +423,29 @@ const styles = StyleSheet.create({
   cardTopRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: 12,
+    gap: 10,
+  },
+  cardTopLeft: {
+    flex: 1,
+    gap: 8,
+  },
+  labelRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  shadowLabelPill: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  shadowLabelText: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.2,
   },
   sourceTag: {
     flexDirection: 'row',

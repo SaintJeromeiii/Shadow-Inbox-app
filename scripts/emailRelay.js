@@ -21,10 +21,12 @@ const { archiveMessages, trashMessages } = require('../backend/gmailClient');
 const { readNotifications, removeNotificationIds } = require('../backend/notificationFeed');
 const { getAccount, listAccounts, resolveAccountKey } = require('../backend/accounts');
 const { fetchNotifications } = require('./fetchNotifications');
-const { completeGoogleOAuth } = require('../backend/googleOAuth');
-const { toPublicProfile } = require('../backend/userTokens');
-const { getValidAccessToken } = require('../backend/googleOAuth');
-const { getOAuthAccount } = require('../backend/userTokens');
+const { completeGoogleOAuth, getValidAccessToken } = require('../backend/googleOAuth');
+const { toPublicProfile, getOAuthAccount, removeOAuthAccount } = require('../backend/userTokens');
+const { generateDailyBriefing } = require('../backend/briefingService');
+const { ensureShadowLabelSet } = require('../backend/shadowLabels');
+const { applyShadowLabelsToNotification } = require('../backend/shadowLabels');
+const { writeNotifications } = require('../backend/notificationFeed');
 
 const knowledgeBase = loadKnowledgeBase();
 console.log(
@@ -101,6 +103,41 @@ app.get('/api/accounts', (_req, res) => {
   res.json({ accounts: listAccounts() });
 });
 
+function handleRemoveAccountRequest(req, res) {
+  const accountKey = resolveAccountKey(
+    req.params?.accountKey || req.body?.accountKey,
+  );
+
+  if (!accountKey) {
+    res.status(400).json({ error: 'Missing "accountKey".' });
+    return;
+  }
+
+  if (!getOAuthAccount(accountKey)) {
+    res.status(400).json({
+      error: 'Only linked Google accounts can be removed. Personal and work inboxes stay configured via .env.',
+    });
+    return;
+  }
+
+  const removed = removeOAuthAccount(accountKey);
+  if (!removed) {
+    res.status(404).json({ error: `OAuth account not found: ${accountKey}` });
+    return;
+  }
+
+  console.log(`[Relay] Removed Google account ${removed.email} (${accountKey})`);
+  res.status(200).json({
+    success: true,
+    accountKey,
+    email: removed.email,
+    accounts: listAccounts(),
+  });
+}
+
+app.delete('/api/accounts/:accountKey', handleRemoveAccountRequest);
+app.post('/api/accounts/remove', handleRemoveAccountRequest);
+
 app.post('/api/auth/google/callback', async (req, res) => {
   const { code, redirectUri, codeVerifier, clientId, clientType } = req.body ?? {};
 
@@ -134,6 +171,15 @@ app.post('/api/auth/google/callback', async (req, res) => {
       console.warn(
         `[Relay] OAuth account linked but initial fetch failed for ${saved.accountKey}:`,
         fetchError,
+      );
+    }
+
+    try {
+      await ensureShadowLabelSet(saved.accountKey);
+    } catch (labelError) {
+      console.warn(
+        `[Relay] Could not bootstrap Shadow labels for ${saved.accountKey}:`,
+        labelError,
       );
     }
 
@@ -177,6 +223,79 @@ app.get('/api/emails', async (req, res) => {
     });
   }
 });
+
+async function handleBriefingRequest(req, res) {
+  const triageByAccount = req.body?.triageByAccount ?? null;
+
+  try {
+    const briefing = await generateDailyBriefing({
+      triageByAccount,
+      knowledgeBase,
+    });
+
+    console.log(
+      `[Relay] Generated briefing (${briefing.mode}) — ${briefing.stats.totalToday} emails across ${briefing.stats.accountCount} account(s).`,
+    );
+
+    res.status(200).json(briefing);
+  } catch (error) {
+    console.error('[Relay] GET /api/briefing failed:', error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Failed to generate briefing.',
+    });
+  }
+}
+
+app.get('/api/briefing', handleBriefingRequest);
+app.post('/api/briefing', handleBriefingRequest);
+
+app.post('/api/emails/sync-labels', async (req, res) => {
+  const accountKey = getAccountKeyFromRequest(req);
+  const items = Array.isArray(req.body?.notifications) ? req.body.notifications : [];
+
+  if (items.length === 0) {
+    res.status(400).json({ error: 'Provide a non-empty "notifications" array.' });
+    return;
+  }
+
+  try {
+    const current = readNotifications(accountKey);
+    const byId = new Map(current.map((item) => [item.id, item]));
+    const updated = [];
+
+    for (const item of items) {
+      const existing = byId.get(item.id);
+      if (!existing) continue;
+
+      const labeled = await applyShadowLabelsToNotification(
+        accountKey,
+        { ...existing, ...item },
+        item.triage,
+      );
+      byId.set(item.id, labeled);
+      updated.push(labeled);
+    }
+
+    writeNotifications(accountKey, Array.from(byId.values()));
+
+    res.status(200).json({
+      success: true,
+      accountKey,
+      updatedCount: updated.length,
+      notifications: updated,
+    });
+  } catch (error) {
+    console.error(`[Relay] sync-labels failed for ${accountKey}:`, error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Failed to sync Gmail labels.',
+    });
+  }
+});
+
+function notificationsForIds(accountKey, ids) {
+  const idSet = new Set(ids);
+  return readNotifications(accountKey).filter((item) => idSet.has(item.id));
+}
 
 app.post('/send-reply', async (req, res) => {
   const accountKey = getAccountKeyFromRequest(req);
@@ -254,7 +373,11 @@ app.post('/api/emails/archive', async (req, res) => {
     let gmailResult = { archived: 0, unsupported: ids };
 
     if (!account.mockOnly) {
-      gmailResult = await archiveMessages(accountKey, ids);
+      gmailResult = await archiveMessages(
+        accountKey,
+        ids,
+        notificationsForIds(accountKey, ids),
+      );
     }
 
     const feedResult = removeNotificationIds(accountKey, ids);
@@ -295,7 +418,11 @@ app.post('/api/emails/trash', async (req, res) => {
     let gmailResult = { trashed: 0, unsupported: ids };
 
     if (!account.mockOnly) {
-      gmailResult = await trashMessages(accountKey, ids);
+      gmailResult = await trashMessages(
+        accountKey,
+        ids,
+        notificationsForIds(accountKey, ids),
+      );
     }
 
     const feedResult = removeNotificationIds(accountKey, ids);
