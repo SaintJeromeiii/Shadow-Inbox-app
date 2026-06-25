@@ -92,9 +92,12 @@ async function exchangeAuthorizationCode({
   const body = new URLSearchParams({
     code,
     client_id: client.clientId,
-    redirect_uri: redirectUri,
     grant_type: 'authorization_code',
   });
+
+  if (redirectUri) {
+    body.set('redirect_uri', redirectUri);
+  }
 
   if (codeVerifier) {
     body.set('code_verifier', codeVerifier);

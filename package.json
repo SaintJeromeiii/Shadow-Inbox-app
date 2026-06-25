@@ -5,6 +5,7 @@
   "dependencies": {
     "@expo/vector-icons": "15.0.3",
     "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-native-google-signin/google-signin": "^16.1.2",
     "expo": "^54.0.35",
     "expo-auth-session": "~7.0.11",
     "expo-clipboard": "~8.0.8",
@@ -42,6 +43,7 @@
     "email-relay": "node scripts/syncKnowledgeBase.js && node scripts/emailRelay.js",
     "fetch-daemon": "node scripts/syncKnowledgeBase.js && node scripts/fetchDaemon.js",
     "sync:knowledge-base": "node scripts/syncKnowledgeBase.js",
+    "google:oauth-config": "node scripts/printGoogleOAuthConfig.js",
     "prestart": "node scripts/syncKnowledgeBase.js",
     "dev:backend": "concurrently --names relay,daemon --prefix-colors blue,magenta \"npm run email-relay\" \"npm run fetch-daemon\"",
     "build:ios": "eas build --profile development --platform ios",

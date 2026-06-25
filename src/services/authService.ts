@@ -25,7 +25,7 @@ export async function fetchRelayAccounts(): Promise<AccountProfile[]> {
 
 export async function exchangeGoogleAuthCode(input: {
   code: string;
-  redirectUri: string;
+  redirectUri?: string;
   codeVerifier?: string;
   clientId?: string;
   clientType?: GoogleOAuthClientType;

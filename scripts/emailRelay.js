@@ -109,7 +109,11 @@ app.post('/api/auth/google/callback', async (req, res) => {
     return;
   }
 
-  if (!redirectUri || typeof redirectUri !== 'string') {
+  const resolvedClientType = clientType === 'web' ? 'web' : 'android';
+  if (
+    resolvedClientType === 'android' &&
+    (!redirectUri || typeof redirectUri !== 'string')
+  ) {
     res.status(400).json({ error: 'Missing native "redirectUri" from the OAuth request.' });
     return;
   }
@@ -117,10 +121,10 @@ app.post('/api/auth/google/callback', async (req, res) => {
   try {
     const saved = await completeGoogleOAuth({
       code,
-      redirectUri,
+      redirectUri: typeof redirectUri === 'string' ? redirectUri : undefined,
       codeVerifier,
       clientId,
-      clientType: clientType === 'web' ? 'web' : 'android',
+      clientType: resolvedClientType,
     });
     const account = toPublicProfile(saved);
 
