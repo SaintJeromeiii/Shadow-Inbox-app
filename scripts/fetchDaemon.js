@@ -11,6 +11,13 @@ require('dotenv').config();
 
 const cron = require('node-cron');
 const { fetchNotifications } = require('./fetchNotifications');
+const { loadKnowledgeBase } = require('../backend/knowledgeBase');
+const { listAccountKeys } = require('../backend/accounts');
+
+const knowledgeBase = loadKnowledgeBase();
+console.log(
+  `[Daemon] Smart Memory loaded (${knowledgeBase.length} chars from backend/knowledgebase.txt)`,
+);
 
 const POLL_INTERVAL_CRON = '*/2 * * * *';
 let isRunning = false;
@@ -33,12 +40,14 @@ async function runCheck(trigger = 'scheduled') {
   console.log(`[Daemon] Checking Gmail... (${formatTimestamp()})`);
 
   try {
-    const stats = await fetchNotifications({ silent: true });
-    const updateLabel = stats.newCount === 1 ? 'update' : 'updates';
+    for (const accountKey of listAccountKeys()) {
+      const stats = await fetchNotifications({ accountKey, silent: true });
+      const updateLabel = stats.newCount === 1 ? 'update' : 'updates';
 
-    console.log(
-      `[Daemon] Found ${stats.unreadTotal} unread — ${stats.newCount} new ${updateLabel}, ${stats.writtenCount} total in feed.`,
-    );
+      console.log(
+        `[Daemon][${accountKey}] ${stats.unreadTotal} unread — ${stats.newCount} new ${updateLabel}, ${stats.writtenCount} in feed.`,
+      );
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[Daemon] Fetch failed: ${message}`);

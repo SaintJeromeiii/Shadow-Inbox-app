@@ -8,9 +8,12 @@ import {
   ActivityIndicator,
   Alert,
   RefreshControl,
+  LayoutAnimation,
+  Platform,
+  UIManager,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Ionicons } from '@expo/vector-icons';
 import FeedCard from '../components/FeedCard';
 import {
   triageNotifications,
@@ -18,11 +21,22 @@ import {
   getNotificationDataSource,
 } from '../services/triageService';
 import { getSeedNotifications } from '../services/notificationData';
+import { fetchInboxFromRelay } from '../services/inboxService';
 import {
   loadPersistedNotifications,
   saveNotifications,
 } from '../services/notificationStorage';
-import { sendReply } from '../services/emailService';
+import { sendReply, archiveEmails, trashEmails } from '../services/emailService';
+import {
+  alertNewActionRequiredItems,
+  loadAlertedActionIds,
+  requestNotificationPermissions,
+} from '../services/pushNotifications';
+import { useAccount } from '../context/AccountContext';
+import AccountSwitcherSheet from '../components/AccountSwitcherSheet';
+import { useGoogleSignIn } from '../hooks/useGoogleSignIn';
+import type { AccountKey } from '../types/account';
+import type { AccountProfile } from '../types/account';
 import type { FeedTab, TriagedNotification } from '../types/notification';
 
 const TABS: { key: FeedTab; label: string }[] = [
@@ -30,6 +44,27 @@ const TABS: { key: FeedTab; label: string }[] = [
   { key: 'fyi', label: 'FYI' },
   { key: 'ignore', label: 'Archived' },
 ];
+
+if (
+  Platform.OS === 'android' &&
+  UIManager.setLayoutAnimationEnabledExperimental
+) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
+function animateListChange() {
+  LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+}
+
+function buildDraftMap(notifications: TriagedNotification[]): Record<string, string> {
+  const drafts: Record<string, string> = {};
+  for (const notification of notifications) {
+    if (notification.triage?.suggestedReply) {
+      drafts[notification.id] = notification.triage.suggestedReply;
+    }
+  }
+  return drafts;
+}
 
 function formatLastChecked(date: Date | null): string {
   if (!date) return 'Not yet synced';
@@ -59,6 +94,14 @@ function formatLastChecked(date: Date | null): string {
 }
 
 export default function HomeScreen() {
+  const {
+    activeAccount,
+    activeProfile,
+    accounts,
+    ready: accountReady,
+    refreshAccounts,
+    setActiveAccount,
+  } = useAccount();
   const [notifications, setNotifications] = useState<TriagedNotification[]>([]);
   const [activeTab, setActiveTab] = useState<FeedTab>('action_required');
   const [processing, setProcessing] = useState(false);
@@ -67,9 +110,16 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [timeTick, setTimeTick] = useState(0);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [draftTexts, setDraftTexts] = useState<Record<string, string>>({});
+  const [removingIds, setRemovingIds] = useState<Set<string>>(new Set());
+  const [bulkSending, setBulkSending] = useState(false);
+  const [accountSheetVisible, setAccountSheetVisible] = useState(false);
   const skipNextSave = useRef(true);
+  const alertedActionIdsRef = useRef<Set<string>>(new Set());
+  const loadingAccountRef = useRef<AccountKey | null>(null);
 
-  const dataSource = getNotificationDataSource();
+  const dataSource = getNotificationDataSource(activeAccount);
   const triageMode = getTriageMode();
   const isLiveAi = triageMode === 'live';
 
@@ -86,39 +136,98 @@ export default function HomeScreen() {
     return () => clearInterval(intervalId);
   }, []);
 
-  const reloadInboxFromSource = useCallback(async () => {
-    await AsyncStorage.clear();
-    skipNextSave.current = true;
-
-    const freshNotifications = getSeedNotifications().map((notification) => ({
-      ...notification,
-    }));
-
-    setNotifications(freshNotifications);
-    setActiveTab('action_required');
-    setProcessing(false);
-    setProgress(null);
-    setLastUpdated(new Date());
-  }, []);
-
   useEffect(() => {
     let cancelled = false;
 
-    async function hydrate() {
-      const persisted = await loadPersistedNotifications();
-      if (!cancelled) {
-        setNotifications(persisted);
-        setLastUpdated(new Date());
-        setHydrated(true);
-      }
+    async function setupNotifications() {
+      const granted = await requestNotificationPermissions();
+      if (cancelled) return;
+
+      setNotificationsEnabled(granted);
+      alertedActionIdsRef.current = await loadAlertedActionIds();
     }
 
-    void hydrate();
+    void setupNotifications();
 
     return () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!hydrated || !notificationsEnabled) return;
+
+    let cancelled = false;
+
+    async function watchForActionRequired() {
+      const updatedIds = await alertNewActionRequiredItems(
+        notifications,
+        alertedActionIdsRef.current,
+      );
+
+      if (!cancelled) {
+        alertedActionIdsRef.current = updatedIds;
+      }
+    }
+
+    void watchForActionRequired();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [notifications, hydrated, notificationsEnabled]);
+
+  const reloadInboxFromSource = useCallback(
+    async (accountKey: AccountKey, sync = true): Promise<TriagedNotification[]> => {
+      skipNextSave.current = true;
+
+      let seed = getSeedNotifications(accountKey);
+      try {
+        const remote = await fetchInboxFromRelay(accountKey, sync);
+        if (remote.notifications.length > 0) {
+          seed = remote.notifications;
+        }
+      } catch (error) {
+        console.warn(
+          `[Shadow Inbox] Relay fetch failed for ${accountKey}, using bundled seed:`,
+          error,
+        );
+      }
+
+      const merged = await loadPersistedNotifications(accountKey, seed);
+      return merged;
+    },
+    [],
+  );
+
+  const applyInboxReload = useCallback(
+    async (accountKey: AccountKey, sync = true) => {
+      if (loadingAccountRef.current === accountKey) return;
+      loadingAccountRef.current = accountKey;
+
+      try {
+        const merged = await reloadInboxFromSource(accountKey, sync);
+        setNotifications(merged);
+        setDraftTexts(buildDraftMap(merged));
+        setRemovingIds(new Set());
+        setActiveTab('action_required');
+        setProcessing(false);
+        setProgress(null);
+        setLastUpdated(new Date());
+        setHydrated(true);
+      } finally {
+        loadingAccountRef.current = null;
+      }
+    },
+    [reloadInboxFromSource],
+  );
+
+  useEffect(() => {
+    if (!accountReady) return;
+    void applyInboxReload(activeAccount, false);
+    // Initial inbox load only — account switches reload via handleSelectAccount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountReady]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -128,17 +237,52 @@ export default function HomeScreen() {
       return;
     }
 
-    void saveNotifications(notifications);
-  }, [notifications, hydrated]);
+    void saveNotifications(activeAccount, notifications);
+  }, [notifications, hydrated, activeAccount]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await reloadInboxFromSource();
+      await applyInboxReload(activeAccount, true);
     } finally {
       setRefreshing(false);
     }
-  }, [reloadInboxFromSource]);
+  }, [activeAccount, applyInboxReload]);
+
+  const handleSelectAccount = useCallback(
+    async (accountKey: AccountKey) => {
+      setAccountSheetVisible(false);
+      if (accountKey === activeAccount) return;
+
+      await setActiveAccount(accountKey);
+      setRefreshing(true);
+      try {
+        await applyInboxReload(accountKey, true);
+      } finally {
+        setRefreshing(false);
+      }
+    },
+    [activeAccount, applyInboxReload, setActiveAccount],
+  );
+
+  const handleGoogleAccountLinked = useCallback(
+    async (account: AccountProfile) => {
+      setAccountSheetVisible(false);
+      await refreshAccounts();
+      await setActiveAccount(account.key);
+      setRefreshing(true);
+      try {
+        await applyInboxReload(account.key, true);
+      } finally {
+        setRefreshing(false);
+      }
+    },
+    [applyInboxReload, refreshAccounts, setActiveAccount],
+  );
+
+  const { signInWithGoogle, isSigningIn: isGoogleSigningIn } = useGoogleSignIn({
+    onSuccess: handleGoogleAccountLinked,
+  });
 
   const unreadCount = useMemo(
     () => notifications.filter((n) => !n.triage && !n.archived).length,
@@ -171,6 +315,86 @@ export default function HomeScreen() {
     return counts;
   }, [notifications]);
 
+  const actionRequiredItems = useMemo(
+    () =>
+      notifications.filter(
+        (n) => !n.archived && n.triage?.category === 'action_required',
+      ),
+    [notifications],
+  );
+
+  const showBulkSend = actionRequiredItems.length >= 2;
+
+  const removeNotificationsFromFeed = useCallback((ids: string[]) => {
+    const idSet = new Set(ids);
+    setRemovingIds((prev) => new Set([...prev, ...ids]));
+
+    setTimeout(() => {
+      animateListChange();
+      setNotifications((prev) => prev.filter((n) => !idSet.has(n.id)));
+      setDraftTexts((prev) => {
+        const next = { ...prev };
+        for (const id of ids) {
+          delete next[id];
+        }
+        return next;
+      });
+      setRemovingIds((prev) => {
+        const next = new Set(prev);
+        for (const id of ids) {
+          next.delete(id);
+        }
+        return next;
+      });
+    }, 220);
+  }, []);
+
+  const handleDraftChange = useCallback((id: string, text: string) => {
+    setDraftTexts((prev) => ({ ...prev, [id]: text }));
+  }, []);
+
+  const handleGmailArchive = useCallback(
+    async (notification: TriagedNotification) => {
+      if (notification.sourceApp !== 'Email') {
+        removeNotificationsFromFeed([notification.id]);
+        return;
+      }
+
+      const result = await archiveEmails([notification.id]);
+      if (!result.success) {
+        Alert.alert(
+          'Archive Failed',
+          result.error ?? 'Could not archive this email. Is the relay running?',
+        );
+        return;
+      }
+
+      removeNotificationsFromFeed([notification.id]);
+    },
+    [removeNotificationsFromFeed],
+  );
+
+  const handleTrash = useCallback(
+    async (notification: TriagedNotification) => {
+      if (notification.sourceApp !== 'Email') {
+        removeNotificationsFromFeed([notification.id]);
+        return;
+      }
+
+      const result = await trashEmails([notification.id]);
+      if (!result.success) {
+        Alert.alert(
+          'Trash Failed',
+          result.error ?? 'Could not trash this email. Is the relay running?',
+        );
+        return;
+      }
+
+      removeNotificationsFromFeed([notification.id]);
+    },
+    [removeNotificationsFromFeed],
+  );
+
   const handleProcessFeed = useCallback(async () => {
     const pending = notifications.filter((n) => !n.triage);
     if (pending.length === 0) return;
@@ -189,25 +413,39 @@ export default function HomeScreen() {
           return triage ? { ...n, triage } : n;
         }),
       );
+      setDraftTexts((prev) => {
+        const next = { ...prev };
+        for (const [id, triage] of results.entries()) {
+          if (triage.suggestedReply) {
+            next[id] = triage.suggestedReply;
+          }
+        }
+        return next;
+      });
     } finally {
       setProcessing(false);
       setProgress(null);
     }
   }, [notifications]);
 
-  const handleArchive = useCallback((id: string) => {
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, archived: true } : n)),
-    );
-  }, []);
-
   const handleSendReply = useCallback(
     async (notification: TriagedNotification, replyText: string) => {
       const result = await sendReply(notification, replyText);
 
       if (result.success) {
-        Alert.alert('Message Sent!', 'Your reply was delivered successfully.');
-        handleArchive(notification.id);
+        if (notification.sourceApp === 'Email') {
+          const archiveResult = await archiveEmails([notification.id]);
+          if (!archiveResult.success) {
+            Alert.alert(
+              'Sent — Archive Pending',
+              'Reply delivered, but Gmail archive failed. You can archive manually.',
+            );
+            removeNotificationsFromFeed([notification.id]);
+            return;
+          }
+        }
+
+        removeNotificationsFromFeed([notification.id]);
         return;
       }
 
@@ -216,23 +454,101 @@ export default function HomeScreen() {
         result.error ?? 'Could not send reply. Is the email relay running?',
       );
     },
-    [handleArchive],
+    [removeNotificationsFromFeed],
   );
+
+  const handleBulkSendAll = useCallback(async () => {
+    if (bulkSending || actionRequiredItems.length < 2) return;
+
+    const sendable = actionRequiredItems.filter((notification) => {
+      const draft =
+        draftTexts[notification.id]?.trim() ??
+        notification.triage?.suggestedReply?.trim() ??
+        '';
+      return draft.length > 0 && notification.sourceApp === 'Email';
+    });
+
+    if (sendable.length === 0) {
+      Alert.alert(
+        'No Drafts Ready',
+        'Add reply text to at least one action-required email before bulk sending.',
+      );
+      return;
+    }
+
+    setBulkSending(true);
+
+    const sentIds: string[] = [];
+    const failed: string[] = [];
+
+    try {
+      for (const notification of sendable) {
+        const replyText =
+          draftTexts[notification.id]?.trim() ??
+          notification.triage?.suggestedReply?.trim() ??
+          '';
+
+        const result = await sendReply(notification, replyText);
+        if (result.success) {
+          sentIds.push(notification.id);
+        } else {
+          failed.push(notification.sender);
+        }
+      }
+
+      if (sentIds.length > 0) {
+        const archiveResult = await archiveEmails(sentIds);
+        if (!archiveResult.success) {
+          Alert.alert(
+            'Sent — Archive Pending',
+            `${sentIds.length} repl${sentIds.length === 1 ? 'y' : 'ies'} sent, but Gmail archive failed for some messages.`,
+          );
+        }
+        removeNotificationsFromFeed(sentIds);
+      }
+
+      if (failed.length > 0) {
+        Alert.alert(
+          'Partial Send',
+          `${sentIds.length} sent, ${failed.length} failed. Check relay connection and retry.`,
+        );
+      } else if (sentIds.length > 0) {
+        Alert.alert(
+          'All Drafts Sent',
+          `${sentIds.length} repl${sentIds.length === 1 ? 'y' : 'ies'} delivered and archived.`,
+        );
+      }
+    } finally {
+      setBulkSending(false);
+    }
+  }, [
+    actionRequiredItems,
+    bulkSending,
+    draftTexts,
+    removeNotificationsFromFeed,
+  ]);
 
   const renderEmpty = () => (
     <View style={styles.emptyState}>
+      <View style={styles.emptyIconWrap}>
+        <Ionicons name="mail-open-outline" size={44} color="#3D4A63" />
+      </View>
       <Text style={styles.emptyTitle}>
-        {activeTab === 'ignore' ? 'Nothing archived' : 'No notifications here'}
+        {activeTab === 'ignore'
+          ? 'Inbox zero — archived'
+          : activeTab === 'action_required'
+            ? 'All caught up'
+            : 'Nothing to review'}
       </Text>
       <Text style={styles.emptySubtitle}>
         {unreadCount > 0
           ? 'Tap "Process Feed" to triage your inbox.'
-          : 'Pull down to refresh, or check another tab.'}
+          : 'Pull down to refresh when new mail arrives.'}
       </Text>
     </View>
   );
 
-  if (!hydrated) {
+  if (!hydrated || !accountReady) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.loadingState}>
@@ -281,12 +597,31 @@ export default function HomeScreen() {
             </View>
             <Text style={styles.headerSubtitle}>
               {unreadCount > 0
-                ? `${unreadCount} unread · ${dataSource} feed`
-                : `Feed processed · ${dataSource} data`}
+                ? `${unreadCount} unread · ${activeProfile.label}`
+                : `${activeProfile.label} · ${dataSource} data`}
             </Text>
           </View>
         </View>
-        <Pressable
+        <View style={styles.headerActions}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.accountPill,
+              { borderColor: activeProfile.accentColor },
+              pressed && styles.accountPillPressed,
+            ]}
+            onPress={() => setAccountSheetVisible(true)}
+            accessibilityLabel="Switch inbox account"
+          >
+            <View
+              style={[
+                styles.accountAvatar,
+                { backgroundColor: activeProfile.accentColor },
+              ]}
+            >
+              <Text style={styles.accountAvatarText}>{activeProfile.initials}</Text>
+            </View>
+          </Pressable>
+          <Pressable
           style={({ pressed }) => [
             styles.processButton,
             (processing || unreadCount === 0) && styles.processButtonDisabled,
@@ -304,7 +639,42 @@ export default function HomeScreen() {
             <Text style={styles.processButtonText}>Process Feed</Text>
           )}
         </Pressable>
+        </View>
       </View>
+
+      <AccountSwitcherSheet
+        visible={accountSheetVisible}
+        accounts={accounts}
+        activeAccount={activeAccount}
+        onSelect={(accountKey) => void handleSelectAccount(accountKey)}
+        onAddGoogle={() => void signInWithGoogle()}
+        isAddingGoogle={isGoogleSigningIn}
+        onClose={() => setAccountSheetVisible(false)}
+      />
+
+      {showBulkSend && (
+        <View style={styles.bulkBar}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.bulkButton,
+              bulkSending && styles.bulkButtonDisabled,
+              pressed && !bulkSending && styles.bulkButtonPressed,
+            ]}
+            onPress={() => void handleBulkSendAll()}
+            disabled={bulkSending}
+          >
+            {bulkSending ? (
+              <ActivityIndicator color="#0D0F14" size="small" />
+            ) : (
+              <Ionicons name="paper-plane" size={16} color="#0D0F14" />
+            )}
+            <Text style={styles.bulkButtonText}>Approve & Send All Drafts</Text>
+            <View style={styles.bulkCountBadge}>
+              <Text style={styles.bulkCountText}>{actionRequiredItems.length}</Text>
+            </View>
+          </Pressable>
+        </View>
+      )}
 
       <View style={styles.tabBar}>
         {TABS.map((tab) => {
@@ -339,8 +709,15 @@ export default function HomeScreen() {
         renderItem={({ item }) => (
           <FeedCard
             notification={item}
-            onArchive={handleArchive}
+            draftText={
+              draftTexts[item.id] ?? item.triage?.suggestedReply ?? ''
+            }
+            onDraftChange={handleDraftChange}
+            onGmailArchive={handleGmailArchive}
+            onTrash={handleTrash}
             onSendReply={handleSendReply}
+            isRemoving={removingIds.has(item.id)}
+            actionBusy={bulkSending}
           />
         )}
         contentContainerStyle={styles.listContent}
@@ -387,7 +764,36 @@ const styles = StyleSheet.create({
   },
   headerLeft: {
     flex: 1,
-    marginRight: 12,
+    marginRight: 8,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  accountPill: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#161922',
+  },
+  accountPillPressed: {
+    opacity: 0.85,
+  },
+  accountAvatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  accountAvatarText: {
+    color: '#0D0F14',
+    fontSize: 13,
+    fontWeight: '800',
   },
   headerMeta: {
     marginTop: 6,
@@ -487,6 +893,48 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
+  bulkBar: {
+    paddingHorizontal: 16,
+    marginBottom: 12,
+  },
+  bulkButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#6EE7A0',
+    borderRadius: 12,
+    paddingVertical: 13,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(110, 231, 160, 0.45)',
+  },
+  bulkButtonDisabled: {
+    opacity: 0.65,
+  },
+  bulkButtonPressed: {
+    opacity: 0.88,
+  },
+  bulkButtonText: {
+    color: '#0D0F14',
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
+  bulkCountBadge: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(13, 15, 20, 0.12)',
+  },
+  bulkCountText: {
+    color: '#0D0F14',
+    fontSize: 11,
+    fontWeight: '800',
+  },
   tabBar: {
     flexDirection: 'row',
     paddingHorizontal: 16,
@@ -547,6 +995,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingTop: 80,
     paddingHorizontal: 40,
+  },
+  emptyIconWrap: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#141824',
+    borderWidth: 1,
+    borderColor: '#232A38',
+    marginBottom: 20,
   },
   emptyTitle: {
     color: '#8B93A8',

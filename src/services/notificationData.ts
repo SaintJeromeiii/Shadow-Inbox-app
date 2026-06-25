@@ -1,10 +1,12 @@
 import type { RawNotification } from '../types/notification';
-import realNotificationsData from '../data/realNotifications.json';
+import type { AccountKey } from '../types/account';
+import personalNotificationsData from '../data/account_personal_notifications.json';
+import workNotificationsData from '../data/account_work_notifications.json';
 
-type WrappedNotifications =
-  | RawNotification[]
-  | { notifications?: RawNotification[] }
-  | { emails?: RawNotification[] };
+const BUNDLED_BY_ACCOUNT: Record<string, unknown> = {
+  personal: personalNotificationsData,
+  work: workNotificationsData,
+};
 
 function extractNotificationArray(data: unknown): RawNotification[] {
   if (Array.isArray(data)) {
@@ -23,20 +25,21 @@ function extractNotificationArray(data: unknown): RawNotification[] {
     }
   }
 
-  console.warn(
-    '[Shadow Inbox] realNotifications.json has no recognizable notification array.',
-  );
+  console.warn('[Shadow Inbox] Account notification file has no recognizable array.');
   return [];
 }
 
-export function getSeedNotifications(): RawNotification[] {
-  return extractNotificationArray(realNotificationsData).map((notification) => ({
+export function getSeedNotifications(accountKey: AccountKey = 'personal'): RawNotification[] {
+  const data = BUNDLED_BY_ACCOUNT[accountKey];
+  if (!data) {
+    return [];
+  }
+
+  return extractNotificationArray(data).map((notification) => ({
     ...notification,
   }));
 }
 
-export function getNotificationDataSource(): 'real' | 'empty' {
-  return extractNotificationArray(realNotificationsData).length > 0
-    ? 'real'
-    : 'empty';
+export function getNotificationDataSource(accountKey: AccountKey = 'personal'): 'real' | 'empty' {
+  return getSeedNotifications(accountKey).length > 0 ? 'real' : 'empty';
 }

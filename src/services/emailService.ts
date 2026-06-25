@@ -1,8 +1,27 @@
 import type { TriagedNotification } from '../types/notification';
+import type { AccountKey } from '../types/account';
 
 const RELAY_URL =
   process.env.EXPO_PUBLIC_EMAIL_RELAY_URL ?? 'http://localhost:3000';
 const REQUEST_TIMEOUT_MS = 15_000;
+
+let activeAccountKey: AccountKey = 'personal';
+
+export function setActiveAccountKey(accountKey: AccountKey): void {
+  activeAccountKey = accountKey;
+}
+
+export function getActiveAccountKey(): AccountKey {
+  return activeAccountKey;
+}
+
+function relayHeaders(extra?: HeadersInit): HeadersInit {
+  return {
+    'Content-Type': 'application/json',
+    'X-Account-Key': activeAccountKey,
+    ...extra,
+  };
+}
 
 export interface SendReplyPayload {
   recipient: string;
@@ -13,6 +32,13 @@ export interface SendReplyPayload {
 export interface SendReplyResult {
   success: boolean;
   error?: string;
+}
+
+export interface GmailActionResult {
+  success: boolean;
+  error?: string;
+  processed?: number;
+  unsupported?: string[];
 }
 
 export function parseRecipientEmail(sender: string): string | null {
@@ -110,7 +136,7 @@ export async function sendReply(
       `${getRelayUrl()}/send-reply`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: relayHeaders(),
         body: JSON.stringify(payload),
       },
       REQUEST_TIMEOUT_MS,
@@ -154,4 +180,67 @@ export async function sendReply(
     console.warn('[Shadow Inbox] Email send failed:', error);
     return { success: false, error: message };
   }
+}
+
+async function postGmailAction(
+  endpoint: 'archive' | 'trash',
+  ids: string[],
+): Promise<GmailActionResult> {
+  if (ids.length === 0) {
+    return { success: false, error: 'No email IDs provided.' };
+  }
+
+  try {
+    const response = await fetchWithTimeout(
+      `${getRelayUrl()}/api/emails/${endpoint}`,
+      {
+        method: 'POST',
+        headers: relayHeaders(),
+        body: JSON.stringify({ ids }),
+      },
+      REQUEST_TIMEOUT_MS,
+    );
+
+    if (!response.ok) {
+      let errorMessage = `Relay returned ${response.status}`;
+      try {
+        const errorBody = (await response.json()) as { error?: string };
+        if (errorBody.error) {
+          errorMessage = errorBody.error;
+        }
+      } catch {
+        const text = await response.text();
+        if (text) errorMessage = text;
+      }
+      return { success: false, error: errorMessage };
+    }
+
+    const data = (await response.json()) as {
+      archived?: number;
+      trashed?: number;
+      unsupported?: string[];
+    };
+
+    return {
+      success: true,
+      processed: data.archived ?? data.trashed ?? ids.length,
+      unsupported: data.unsupported,
+    };
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : `Could not reach the email relay for ${endpoint}.`;
+
+    console.warn(`[Shadow Inbox] Gmail ${endpoint} failed:`, error);
+    return { success: false, error: message };
+  }
+}
+
+export async function archiveEmails(ids: string[]): Promise<GmailActionResult> {
+  return postGmailAction('archive', ids);
+}
+
+export async function trashEmails(ids: string[]): Promise<GmailActionResult> {
+  return postGmailAction('trash', ids);
 }

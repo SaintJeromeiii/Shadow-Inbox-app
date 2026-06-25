@@ -8,6 +8,7 @@ import {
   TextInput,
   ActivityIndicator,
   Keyboard,
+  Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
@@ -16,11 +17,16 @@ import { SOURCE_COLORS, SOURCE_LABELS } from '../constants/sourceStyles';
 
 interface FeedCardProps {
   notification: TriagedNotification;
-  onArchive: (id: string) => void;
+  draftText: string;
+  onDraftChange: (id: string, text: string) => void;
+  onGmailArchive: (notification: TriagedNotification) => Promise<void>;
+  onTrash: (notification: TriagedNotification) => Promise<void>;
   onSendReply: (
     notification: TriagedNotification,
     replyText: string,
   ) => Promise<void>;
+  isRemoving?: boolean;
+  actionBusy?: boolean;
 }
 
 function formatTimestamp(iso: string): string {
@@ -83,31 +89,47 @@ function ActionButton({
 
 export default function FeedCard({
   notification,
-  onArchive,
+  draftText,
+  onDraftChange,
+  onGmailArchive,
+  onTrash,
   onSendReply,
+  isRemoving = false,
+  actionBusy = false,
 }: FeedCardProps) {
   const [expanded, setExpanded] = useState(false);
-  const [replyText, setReplyText] = useState('');
   const [sending, setSending] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [localAction, setLocalAction] = useState<'archive' | 'trash' | null>(null);
   const replyInputRef = useRef<TextInput>(null);
+  const fadeAnim = useRef(new Animated.Value(1)).current;
   const triage = notification.triage;
   const sourceColor = SOURCE_COLORS[notification.sourceApp];
   const isActionRequired = triage?.category === 'action_required';
+  const isEmail = notification.sourceApp === 'Email';
+  const busy = sending || actionBusy || localAction !== null;
 
   useEffect(() => {
-    setReplyText(triage?.suggestedReply ?? '');
-    setIsEditing(false);
-  }, [triage?.suggestedReply, notification.id]);
+    if (!isRemoving) {
+      fadeAnim.setValue(1);
+      return;
+    }
+
+    Animated.timing(fadeAnim, {
+      toValue: 0,
+      duration: 220,
+      useNativeDriver: true,
+    }).start();
+  }, [fadeAnim, isRemoving]);
 
   const handleCopy = async () => {
-    if (!replyText.trim()) return;
-    await Clipboard.setStringAsync(replyText.trim());
+    if (!draftText.trim()) return;
+    await Clipboard.setStringAsync(draftText.trim());
     Alert.alert('Copied', 'Your edited reply was copied to clipboard.');
   };
 
   const handleSend = async () => {
-    const finalReply = replyText.trim();
+    const finalReply = draftText.trim();
     if (!finalReply || sending) return;
 
     Keyboard.dismiss();
@@ -119,11 +141,32 @@ export default function FeedCard({
     }
   };
 
+  const handleQuickArchive = async () => {
+    if (busy) return;
+    setLocalAction('archive');
+    try {
+      await onGmailArchive(notification);
+    } finally {
+      setLocalAction(null);
+    }
+  };
+
+  const handleQuickTrash = async () => {
+    if (busy) return;
+    setLocalAction('trash');
+    try {
+      await onTrash(notification);
+    } finally {
+      setLocalAction(null);
+    }
+  };
+
   const stopCardPress = (event?: { stopPropagation?: () => void }) => {
     event?.stopPropagation?.();
   };
 
   return (
+    <Animated.View style={{ opacity: fadeAnim }}>
     <Pressable
       onPress={() => {
         if (!isEditing) {
@@ -182,6 +225,50 @@ export default function FeedCard({
         <Text style={styles.timestamp}>{formatTimestamp(notification.timestamp)}</Text>
       </View>
 
+      {isEmail && (
+        <View style={styles.quickActions}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.quickActionButton,
+              pressed && !busy && styles.quickActionPressed,
+              busy && styles.quickActionDisabled,
+            ]}
+            onPress={(e) => {
+              stopCardPress(e);
+              void handleQuickArchive();
+            }}
+            disabled={busy}
+            accessibilityLabel="Archive email"
+          >
+            {localAction === 'archive' ? (
+              <ActivityIndicator size="small" color="#8B93A8" />
+            ) : (
+              <Ionicons name="archive-outline" size={18} color="#8B93A8" />
+            )}
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [
+              styles.quickActionButton,
+              styles.quickActionDanger,
+              pressed && !busy && styles.quickActionPressed,
+              busy && styles.quickActionDisabled,
+            ]}
+            onPress={(e) => {
+              stopCardPress(e);
+              void handleQuickTrash();
+            }}
+            disabled={busy}
+            accessibilityLabel="Trash email"
+          >
+            {localAction === 'trash' ? (
+              <ActivityIndicator size="small" color="#FF8A8A" />
+            ) : (
+              <Ionicons name="trash-outline" size={18} color="#FF8A8A" />
+            )}
+          </Pressable>
+        </View>
+      )}
+
       {expanded && (
         <View style={styles.expandedSection}>
           <Text style={styles.expandedLabel}>Raw message</Text>
@@ -205,8 +292,8 @@ export default function FeedCard({
               <TextInput
                 ref={replyInputRef}
                 style={styles.replyInput}
-                value={replyText}
-                onChangeText={setReplyText}
+                value={draftText}
+                onChangeText={(text) => onDraftChange(notification.id, text)}
                 onFocus={() => {
                   setIsEditing(true);
                   setExpanded(true);
@@ -237,14 +324,14 @@ export default function FeedCard({
                   style={({ pressed }) => [
                     styles.actionButton,
                     styles.sendButton,
-                    (sending || !replyText.trim()) && styles.actionButtonDisabled,
+                    (sending || !draftText.trim()) && styles.actionButtonDisabled,
                     pressed && !sending && styles.buttonPressed,
                   ]}
                   onPress={(e) => {
                     stopCardPress(e);
                     void handleSend();
                   }}
-                  disabled={sending || !replyText.trim()}
+                  disabled={sending || !draftText.trim()}
                 >
                   {sending ? (
                     <ActivityIndicator color="#FFFFFF" size="small" />
@@ -255,36 +342,13 @@ export default function FeedCard({
                     </>
                   )}
                 </Pressable>
-                <ActionButton
-                  label="Archive"
-                  icon="archive-outline"
-                  variant="ghost"
-                  onPress={(e) => {
-                    stopCardPress(e);
-                    onArchive(notification.id);
-                  }}
-                  disabled={sending}
-                />
               </View>
             </Pressable>
-          )}
-
-          {!isActionRequired && (
-            <View style={styles.soloArchiveWrap}>
-              <ActionButton
-                label="Archive"
-                icon="archive-outline"
-                variant="ghost"
-                onPress={(e) => {
-                  stopCardPress(e);
-                  onArchive(notification.id);
-                }}
-              />
-            </View>
           )}
         </View>
       )}
     </Pressable>
+    </Animated.View>
   );
 }
 
@@ -374,6 +438,32 @@ const styles = StyleSheet.create({
     color: '#5C6478',
     fontSize: 12,
     fontWeight: '500',
+  },
+  quickActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+    marginTop: 12,
+  },
+  quickActionButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1A2030',
+    borderWidth: 1,
+    borderColor: '#2E3548',
+  },
+  quickActionDanger: {
+    borderColor: 'rgba(255, 107, 107, 0.25)',
+    backgroundColor: 'rgba(255, 107, 107, 0.08)',
+  },
+  quickActionPressed: {
+    opacity: 0.75,
+  },
+  quickActionDisabled: {
+    opacity: 0.45,
   },
   expandedSection: {
     marginTop: 18,
@@ -468,9 +558,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     borderWidth: 1,
     borderColor: '#3D4455',
-  },
-  soloArchiveWrap: {
-    marginTop: 16,
   },
   buttonPressed: {
     opacity: 0.78,

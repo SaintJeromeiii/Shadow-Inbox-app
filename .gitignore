@@ -36,6 +36,9 @@ yarn-error.*
 
 # locally fetched inbox data (contains personal emails)
 src/data/realNotifications.json
+src/data/account_personal_notifications.json
+src/data/account_google_*_notifications.json
+backend/user_tokens.json
 
 # typescript
 *.tsbuildinfo

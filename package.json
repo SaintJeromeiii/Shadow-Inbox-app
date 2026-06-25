@@ -3,11 +3,17 @@
   "version": "1.0.0",
   "main": "index.ts",
   "dependencies": {
-    "@expo/vector-icons": "^15.0.3",
+    "@expo/vector-icons": "15.0.3",
     "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "^54.0.35",
+    "expo-auth-session": "~7.0.11",
     "expo-clipboard": "~8.0.8",
+    "expo-constants": "~18.0.13",
+    "expo-crypto": "~15.0.9",
+    "expo-dev-client": "~6.0.21",
+    "expo-notifications": "~0.32.17",
     "expo-status-bar": "~3.0.9",
+    "expo-web-browser": "~15.0.11",
     "react": "19.1.0",
     "react-native": "0.81.5",
     "react-native-safe-area-context": "~5.6.0"
@@ -27,13 +33,22 @@
   },
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "ios": "expo run:ios",
+    "ios:dev": "expo run:ios",
+    "android": "expo run:android",
+    "android:dev": "expo run:android",
     "web": "expo start --web",
-    "fetch-notifications": "node scripts/fetchNotifications.js",
-    "email-relay": "node scripts/emailRelay.js",
-    "fetch-daemon": "node scripts/fetchDaemon.js",
-    "dev:backend": "concurrently --names relay,daemon --prefix-colors blue,magenta \"npm run email-relay\" \"npm run fetch-daemon\""
+    "fetch-notifications": "node scripts/syncKnowledgeBase.js && node scripts/fetchNotifications.js",
+    "email-relay": "node scripts/syncKnowledgeBase.js && node scripts/emailRelay.js",
+    "fetch-daemon": "node scripts/syncKnowledgeBase.js && node scripts/fetchDaemon.js",
+    "sync:knowledge-base": "node scripts/syncKnowledgeBase.js",
+    "prestart": "node scripts/syncKnowledgeBase.js",
+    "dev:backend": "concurrently --names relay,daemon --prefix-colors blue,magenta \"npm run email-relay\" \"npm run fetch-daemon\"",
+    "build:ios": "eas build --profile development --platform ios",
+    "build:android": "eas build --profile development --platform android"
+  },
+  "overrides": {
+    "expo-font": "14.0.12"
   },
   "private": true
 }

@@ -1,4 +1,5 @@
 import type { RawNotification, TriageResult, TriageCategory } from '../types/notification';
+import { getKnowledgeBaseText } from './knowledgeBase';
 export { getSeedNotifications, getNotificationDataSource } from './notificationData';
 
 const API_KEY = process.env.EXPO_PUBLIC_OPENAI_API_KEY ?? '';
@@ -19,7 +20,7 @@ const PLACEHOLDER_KEYS = new Set([
 
 const VALID_CATEGORIES: TriageCategory[] = ['action_required', 'fyi', 'ignore'];
 
-const SYSTEM_PROMPT = `You are the central intelligence router for Jerome's personal Shadow Inbox.
+const BASE_SYSTEM_PROMPT = `You are the central intelligence router for Jerome's personal Shadow Inbox.
 
 Jerome is a busy program analyst and resource manager. Every output must match that voice: sharp, highly efficient, concise, and professional. No filler, no warmth-padding, no corporate fluff.
 
@@ -62,6 +63,33 @@ Critical overrides — NEVER categorize as "ignore" when:
 - The message looks like an active task (todo, action required, please respond, waiting on you, blocking, urgent, follow up)
 
 In all override cases above, category MUST be "action_required" with a suggestedReply and urgencyScore >= 7.`;
+
+let cachedSystemPrompt: string | null = null;
+
+function buildSystemPrompt(): string {
+  if (cachedSystemPrompt !== null) {
+    return cachedSystemPrompt;
+  }
+
+  const knowledgeBase = getKnowledgeBaseText();
+
+  cachedSystemPrompt = `${BASE_SYSTEM_PROMPT}
+
+User Persona & Contextual Knowledge Base:
+"""
+${knowledgeBase}
+"""
+
+Knowledge base rules — apply strictly on every triage:
+- Cross-reference senders, projects, and topics against the knowledge base before choosing a category.
+- Use Key Contacts and Active Projects to judge whether Jerome is the decision owner (action_required) vs. passive observer (fyi).
+- Apply the Communication Tone and Draft Reply Guidelines verbatim when writing suggestedReply.
+- Personalize drafts with correct project names, relationships, and realistic next steps — never generic filler.
+- When the email maps to a known contact or project, reflect that context in cleanSummary and suggestedReply.
+- If the knowledge base conflicts with generic heuristics, the knowledge base wins.`;
+
+  return cachedSystemPrompt;
+}
 
 export type TriageMode = 'live' | 'simulation';
 
@@ -236,7 +264,7 @@ async function callLlmApi(notification: RawNotification): Promise<TriageResult> 
         temperature: 0.2,
         response_format: { type: 'json_object' },
         messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'system', content: buildSystemPrompt() },
           { role: 'user', content: buildUserPrompt(notification) },
         ],
       }),

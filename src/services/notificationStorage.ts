@@ -1,12 +1,18 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { RawNotification, TriagedNotification } from '../types/notification';
+import type { AccountKey } from '../types/account';
 import { getSeedNotifications } from './notificationData';
 
-const STORAGE_KEY = '@shadow_inbox/triaged_notifications';
+function storageKey(accountKey: AccountKey): string {
+  return `@shadow_inbox/triaged_notifications:${accountKey}`;
+}
 
-export async function loadPersistedNotifications(): Promise<TriagedNotification[]> {
-  const seed = getSeedNotifications();
-  const raw = await AsyncStorage.getItem(STORAGE_KEY);
+export async function loadPersistedNotifications(
+  accountKey: AccountKey,
+  seedOverride?: RawNotification[],
+): Promise<TriagedNotification[]> {
+  const seed = seedOverride ?? getSeedNotifications(accountKey);
+  const raw = await AsyncStorage.getItem(storageKey(accountKey));
 
   if (!raw) {
     return seed.map((notification) => ({ ...notification }));
@@ -22,9 +28,10 @@ export async function loadPersistedNotifications(): Promise<TriagedNotification[
 }
 
 export async function saveNotifications(
+  accountKey: AccountKey,
   notifications: TriagedNotification[],
 ): Promise<void> {
-  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(notifications));
+  await AsyncStorage.setItem(storageKey(accountKey), JSON.stringify(notifications));
 }
 
 function mergeWithSeed(

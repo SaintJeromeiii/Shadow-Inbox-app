@@ -1,0 +1,23 @@
+[
+  {
+    "id": "email-work-1001",
+    "sourceApp": "Email",
+    "sender": "Program Director <director@agency.gov>",
+    "rawText": "Subject: Q3 resource plan — action required\n\nJerome — need your updated staffing matrix and risk log by EOD Thursday. Please confirm availability for a 15-min sync tomorrow.",
+    "timestamp": "2026-06-24T20:30:00.000Z"
+  },
+  {
+    "id": "email-work-1002",
+    "sourceApp": "Email",
+    "sender": "Shadow Dev Bot <shadowdev@gmail.com>",
+    "rawText": "Subject: Shadow Inbox staging build ready\n\nNew dev client build is on the shared drive. Please install and run through the bulk-send regression checklist before Friday.",
+    "timestamp": "2026-06-24T18:05:00.000Z"
+  },
+  {
+    "id": "email-work-1003",
+    "sourceApp": "Email",
+    "sender": "HR Systems <hr-systems@company.com>",
+    "rawText": "Subject: Timesheet reminder\n\nFriendly reminder: timesheets for this pay period are due tonight at 11:59 PM ET.",
+    "timestamp": "2026-06-24T16:00:00.000Z"
+  }
+]

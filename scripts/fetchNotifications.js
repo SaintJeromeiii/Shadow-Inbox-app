@@ -1,46 +1,22 @@
 #!/usr/bin/env node
 /**
- * Fetches unread emails via IMAP and writes them to src/data/realNotifications.json.
- *
- * Required env vars:
- *   IMAP_USER, IMAP_PASSWORD, IMAP_HOST, IMAP_PORT
+ * Fetches unread emails via IMAP into per-account notification feeds.
  *
  * Usage:
  *   node scripts/fetchNotifications.js
+ *   node scripts/fetchNotifications.js --account=work
  */
 
 require('dotenv').config();
 
 const fs = require('fs');
-const path = require('path');
-const Imap = require('imap');
 const { simpleParser } = require('mailparser');
+const { getAccount, resolveAccountKey } = require('../backend/accounts');
+const { readNotifications, writeNotifications } = require('../backend/notificationFeed');
+const { openInbox } = require('../backend/imapAuth');
+const { getImapConfigForAccount } = require('../backend/imapAuth');
 
-const OUTPUT_PATH = path.join(__dirname, '..', 'src', 'data', 'realNotifications.json');
 const MAX_UNREAD = 15;
-
-function getImapConfig() {
-  return {
-    user: process.env.IMAP_USER,
-    password: process.env.IMAP_PASSWORD,
-    host: process.env.IMAP_HOST,
-    port: Number(process.env.IMAP_PORT || 993),
-  };
-}
-
-function requireEnv(name, value) {
-  if (!value) {
-    throw new Error(`Missing required environment variable: ${name}`);
-  }
-}
-
-function validateImapConfig() {
-  const { user, password, host, port } = getImapConfig();
-  requireEnv('IMAP_USER', user);
-  requireEnv('IMAP_PASSWORD', password);
-  requireEnv('IMAP_HOST', host);
-  return { user, password, host, port };
-}
 
 function stripHtml(html) {
   return html
@@ -48,7 +24,6 @@ function stripHtml(html) {
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
     .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>/gi, '\n\n')
     .replace(/<\/div>/gi, '\n')
     .replace(/<[^>]+>/g, '')
     .replace(/&nbsp;/g, ' ')
@@ -89,48 +64,8 @@ function buildRawText(subject, body) {
   return `${subjectLine}\n\n${cleanBody}`;
 }
 
-function readExistingIds() {
-  try {
-    const raw = fs.readFileSync(OUTPUT_PATH, 'utf8');
-    const parsed = JSON.parse(raw);
-    const list = Array.isArray(parsed)
-      ? parsed
-      : Array.isArray(parsed?.notifications)
-        ? parsed.notifications
-        : Array.isArray(parsed?.emails)
-          ? parsed.emails
-          : [];
-    return new Set(list.map((item) => item.id));
-  } catch {
-    return new Set();
-  }
-}
-
-function openInbox(config) {
-  return new Promise((resolve, reject) => {
-    const imap = new Imap({
-      user: config.user,
-      password: config.password,
-      host: config.host,
-      port: config.port,
-      tls: config.port === 993,
-      tlsOptions: { rejectUnauthorized: false },
-    });
-
-    imap.once('ready', () => {
-      imap.openBox('INBOX', true, (err) => {
-        if (err) {
-          imap.end();
-          reject(err);
-          return;
-        }
-        resolve(imap);
-      });
-    });
-
-    imap.once('error', reject);
-    imap.connect();
-  });
+function openInboxFromConfig(config) {
+  return openInbox(config, true);
 }
 
 function searchUnread(imap) {
@@ -196,25 +131,103 @@ async function parseMessage(buffer, uid) {
 }
 
 /**
- * @param {{ silent?: boolean }} options
- * @returns {Promise<{ unreadTotal: number, fetchedCount: number, newCount: number, writtenCount: number }>}
+ * @param {{ accountKey?: string, silent?: boolean }} options
  */
 async function fetchNotifications(options = {}) {
+  const accountKey = resolveAccountKey(options.accountKey || 'personal');
   const { silent = false } = options;
-  const config = validateImapConfig();
-  const previousIds = readExistingIds();
+  const account = getAccount(accountKey);
 
-  if (!silent) {
-    console.log(`Connecting to ${config.host}:${config.port} as ${config.user}...`);
+  if (!account) {
+    throw new Error(`Unknown account key: ${accountKey}`);
   }
 
-  const imap = await openInbox(config);
+  if (account.mockOnly) {
+    const existing = readNotifications(accountKey);
+    if (!silent) {
+      console.log(
+        `[${accountKey}] Mock account — keeping ${existing.length} seeded notification(s).`,
+      );
+    }
+    return {
+      accountKey,
+      unreadTotal: existing.length,
+      fetchedCount: 0,
+      newCount: 0,
+      writtenCount: existing.length,
+      mockOnly: true,
+    };
+  }
+
+  if (account.oauth) {
+    const imapConfig = await getImapConfigForAccount(accountKey);
+    const previousIds = new Set(readNotifications(accountKey).map((item) => item.id));
+
+    if (!silent) {
+      console.log(`[${accountKey}] Connecting via Google OAuth as ${imapConfig.user}...`);
+    }
+
+    const imap = await openInboxFromConfig(imapConfig);
+    const unreadUids = await searchUnread(imap);
+    const selectedUids = unreadUids.slice(-MAX_UNREAD).reverse();
+
+    if (!silent) {
+      console.log(
+        `[${accountKey}] Found ${unreadUids.length} unread — fetching ${selectedUids.length}...`,
+      );
+    }
+
+    const rawMessages = await fetchMessages(imap, selectedUids);
+    imap.end();
+
+    const notifications = [];
+    for (const message of rawMessages) {
+      const notification = await parseMessage(message.buffer, message.uid);
+      notifications.push(notification);
+    }
+
+    notifications.sort(
+      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+    );
+
+    const newCount = notifications.filter((item) => !previousIds.has(item.id)).length;
+    writeNotifications(accountKey, notifications);
+
+    if (!silent) {
+      console.log(
+        `[${accountKey}] Wrote ${notifications.length} notification(s) to ${account.feedFile}`,
+      );
+    }
+
+    return {
+      accountKey,
+      unreadTotal: unreadUids.length,
+      fetchedCount: selectedUids.length,
+      newCount,
+      writtenCount: notifications.length,
+      mockOnly: false,
+      oauth: true,
+    };
+  }
+
+  const { user, password, host, port } = account.imap;
+  if (!user || !password) {
+    throw new Error(`IMAP credentials missing for account "${accountKey}".`);
+  }
+
+  const previousIds = new Set(readNotifications(accountKey).map((item) => item.id));
+
+  if (!silent) {
+    console.log(`[${accountKey}] Connecting to ${host}:${port} as ${user}...`);
+  }
+
+  const imap = await openInboxFromConfig({ user, password, host, port });
   const unreadUids = await searchUnread(imap);
   const selectedUids = unreadUids.slice(-MAX_UNREAD).reverse();
 
   if (!silent) {
     console.log(
-      `Found ${unreadUids.length} unread message(s). Fetching ${selectedUids.length}...`,
+      `[${accountKey}] Found ${unreadUids.length} unread — fetching ${selectedUids.length}...`,
     );
   }
 
@@ -232,28 +245,34 @@ async function fetchNotifications(options = {}) {
   );
 
   const newCount = notifications.filter((item) => !previousIds.has(item.id)).length;
-
-  fs.writeFileSync(OUTPUT_PATH, `${JSON.stringify(notifications, null, 2)}\n`, 'utf8');
+  writeNotifications(accountKey, notifications);
 
   if (!silent) {
-    console.log(`Wrote ${notifications.length} notification(s) to ${OUTPUT_PATH}`);
+    console.log(
+      `[${accountKey}] Wrote ${notifications.length} notification(s) to ${account.feedFile}`,
+    );
   }
 
   return {
+    accountKey,
     unreadTotal: unreadUids.length,
     fetchedCount: selectedUids.length,
     newCount,
     writtenCount: notifications.length,
+    mockOnly: false,
   };
 }
 
 module.exports = { fetchNotifications };
 
 if (require.main === module) {
-  fetchNotifications()
+  const argAccount = process.argv.find((arg) => arg.startsWith('--account='));
+  const accountKey = argAccount ? argAccount.split('=')[1] : 'personal';
+
+  fetchNotifications({ accountKey })
     .then((stats) => {
       console.log(
-        `Done — ${stats.unreadTotal} unread, ${stats.newCount} new, ${stats.writtenCount} written.`,
+        `Done [${stats.accountKey}] — ${stats.unreadTotal} unread, ${stats.newCount} new, ${stats.writtenCount} written.`,
       );
     })
     .catch((error) => {
