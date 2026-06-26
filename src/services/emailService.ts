@@ -1,9 +1,11 @@
+import Constants from 'expo-constants';
 import type { TriagedNotification } from '../types/notification';
 import type { AccountKey } from '../types/account';
 import type { ReplyTone } from '../types/replyTone';
 
 const RELAY_URL =
   process.env.EXPO_PUBLIC_EMAIL_RELAY_URL ??
+  Constants.expoConfig?.extra?.emailRelayUrl ??
   'https://shadow-inbox-production.up.railway.app';
 const REQUEST_TIMEOUT_MS = 15_000;
 
@@ -125,7 +127,7 @@ export async function checkRelayHealth(): Promise<boolean> {
     const response = await fetchWithTimeout(
       `${getRelayUrl()}/health`,
       { method: 'GET' },
-      5000,
+      8000,
     );
     return response.ok;
   } catch {

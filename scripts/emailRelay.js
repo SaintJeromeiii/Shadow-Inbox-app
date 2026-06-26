@@ -47,17 +47,38 @@ console.log(
   `[Relay] Smart Memory loaded (${knowledgeBase.length} chars from backend/knowledgebase.txt)`,
 );
 
-function requireEnv(name, value) {
+function requireEnv(name, value, { fatal = true } = {}) {
   if (!value) {
-    console.error(`Missing required environment variable: ${name}`);
-    process.exit(1);
+    const message = `Missing required environment variable: ${name}`;
+    if (fatal) {
+      console.error(message);
+      process.exit(1);
+    }
+    console.warn(`[Relay] ${message}`);
+    return false;
   }
+  return true;
+}
+
+function isCloudRuntime() {
+  return Boolean(
+    process.env.RAILWAY_ENVIRONMENT ||
+      process.env.RAILWAY_PROJECT_ID ||
+      process.env.RENDER ||
+      process.env.FLY_APP_NAME ||
+      (process.env.PORT && !process.env.EMAIL_RELAY_PORT),
+  );
 }
 
 const personalAccount = getAccount('personal');
-requireEnv('SMTP_HOST', personalAccount?.smtp.host);
-requireEnv('SMTP_USER', personalAccount?.smtp.user);
-requireEnv('SMTP_PASS', personalAccount?.smtp.pass);
+const cloudRuntime = isCloudRuntime();
+requireEnv('SMTP_HOST', personalAccount?.smtp.host, { fatal: !cloudRuntime });
+requireEnv('SMTP_USER', personalAccount?.smtp.user, { fatal: !cloudRuntime });
+requireEnv('SMTP_PASS', personalAccount?.smtp.pass, { fatal: !cloudRuntime });
+
+if (cloudRuntime) {
+  console.log('[Relay] Cloud runtime detected — OAuth Gmail linking enabled.');
+}
 
 function getAccountKeyFromRequest(req) {
   const header = req.headers['x-account-key'];
@@ -602,15 +623,22 @@ app.post('/api/emails/trash', async (req, res) => {
 });
 
 function getLanAddress() {
-  const interfaces = os.networkInterfaces();
-  for (const entries of Object.values(interfaces)) {
-    for (const entry of entries ?? []) {
-      if (entry.family === 'IPv4' && !entry.internal) {
-        return entry.address;
+  try {
+    const interfaces = os.networkInterfaces();
+    for (const entries of Object.values(interfaces)) {
+      for (const entry of entries ?? []) {
+        if (entry.family === 'IPv4' && !entry.internal) {
+          return entry.address;
+        }
       }
     }
+  } catch (error) {
+    console.warn(
+      '[Relay] Could not read network interfaces:',
+      error instanceof Error ? error.message : error,
+    );
   }
-  return 'localhost';
+  return null;
 }
 
 function startServer(options = {}) {
@@ -623,8 +651,14 @@ function startServer(options = {}) {
     const storageMode = isSupabaseEnabled() ? 'Supabase' : 'local JSON files';
     console.log(`Shadow Inbox email relay listening on http://${host}:${port}`);
     console.log(`Storage: ${storageMode}`);
-    console.log(`Local:  http://localhost:${port}`);
-    console.log(`Phone:  http://${lanIp}:${port}  (set EXPO_PUBLIC_EMAIL_RELAY_URL to this)`);
+    if (cloudRuntime) {
+      console.log(`Cloud:  https://shadow-inbox-production.up.railway.app (or your Railway URL)`);
+    } else {
+      console.log(`Local:  http://localhost:${port}`);
+      if (lanIp) {
+        console.log(`Phone:  http://${lanIp}:${port}  (set EXPO_PUBLIC_EMAIL_RELAY_URL to this)`);
+      }
+    }
     console.log(`Accounts: ${listAccounts().map((a) => a.key).join(', ')}`);
   });
 

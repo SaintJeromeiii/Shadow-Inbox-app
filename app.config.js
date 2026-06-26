@@ -87,6 +87,9 @@ module.exports = {
       eas: {
         projectId: 'eee5a56a-2363-4537-88a8-d0ec37f916b7',
       },
+      emailRelayUrl:
+        process.env.EXPO_PUBLIC_EMAIL_RELAY_URL ??
+        'https://shadow-inbox-production.up.railway.app',
     },
     owner: 'jleonanderson12',
   },

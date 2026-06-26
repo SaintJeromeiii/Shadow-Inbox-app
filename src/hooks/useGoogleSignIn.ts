@@ -7,7 +7,7 @@ import {
   statusCodes,
 } from '@react-native-google-signin/google-signin';
 import { exchangeGoogleAuthCode } from '../services/authService';
-import { checkRelayHealth } from '../services/emailService';
+import { checkRelayHealth, getRelayUrl } from '../services/emailService';
 import { unhideAccountOnDevice } from '../services/accountStorage';
 import { GOOGLE_OAUTH_SCOPES } from '../constants/googleOAuthScopes';
 import { normalizeGoogleClientId } from '../utils/googleOAuthRedirect';
@@ -78,7 +78,7 @@ export function useGoogleSignIn(options: UseGoogleSignInOptions = {}) {
       if (!relayReady) {
         Alert.alert(
           'Email Relay Offline',
-          'Shadow Inbox could not reach the cloud backend. Confirm EXPO_PUBLIC_EMAIL_RELAY_URL is set correctly, then try again.',
+          `Shadow Inbox could not reach the cloud backend at ${getRelayUrl()}. Confirm Railway is deployed and healthy, then try again.`,
         );
         return;
       }
