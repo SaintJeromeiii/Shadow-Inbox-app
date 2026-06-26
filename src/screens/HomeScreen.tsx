@@ -357,7 +357,7 @@ export default function HomeScreen() {
     void (async () => {
       const dismissed = await isBriefingDismissedForToday();
       setBriefingHidden(dismissed);
-      const merged = await applyInboxReload(activeAccount, false);
+      const merged = await applyInboxReload(activeAccount, true);
       if (!dismissed) {
         await refreshBriefing(merged);
       }

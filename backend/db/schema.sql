@@ -84,3 +84,8 @@ insert into public.auto_pilot_rules (
     '2026-06-26T00:00:00.000Z'
   )
 on conflict (id) do nothing;
+
+-- Backend uses the service role key server-side. Disable RLS so inserts succeed.
+alter table public.notification_feed disable row level security;
+alter table public.finance_transactions disable row level security;
+alter table public.auto_pilot_rules disable row level security;

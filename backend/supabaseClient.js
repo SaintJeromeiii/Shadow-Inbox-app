@@ -15,8 +15,14 @@ function getSupabase() {
   }
 
   if (!client) {
+    const usingServiceRole = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
     const key =
       process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+    if (!usingServiceRole) {
+      console.warn(
+        '[Supabase] SUPABASE_SERVICE_ROLE_KEY is missing — using anon key. Writes may fail RLS checks.',
+      );
+    }
     client = createClient(process.env.SUPABASE_URL, key, {
       auth: {
         persistSession: false,
