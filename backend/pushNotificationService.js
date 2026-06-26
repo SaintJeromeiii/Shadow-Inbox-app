@@ -1,22 +1,97 @@
 const { getAccount } = require('./accounts');
 const { listDevicePushTokens } = require('./devicePushTokens');
 const { hasBeenPushAlerted, markPushAlerted } = require('./pushAlertState');
+const { findMatchingRule } = require('./autoRulesService');
 
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 const ANDROID_CHANNEL_ID = 'shadow-inbox-high-priority';
 const HIGH_URGENCY_THRESHOLD = 7;
+const CRITICAL_URGENCY_THRESHOLD = 9;
+
+const CRASH_ALERT_PATTERN =
+  /\b(crash|crashed|fatal exception|stack trace|segfault|panic|uncaught exception|sentry alert|bugsnag|firebase crashlytics|critical crash)\b/i;
+
+const SERVER_FAILURE_PATTERN =
+  /\b(server down|service outage|deployment failed|500 error|502 bad gateway|503 service|incident declared|pagerduty|statuspage|production is down|database unavailable)\b/i;
+
+const PROJECT_HINTS = [
+  { key: 'AlphaRounds', pattern: /\b(alpharounds|alpha rounds)\b/i },
+  { key: 'DealShield', pattern: /\b(dealshield|deal shield)\b/i },
+  { key: 'ServiceLog', pattern: /\b(servicelog|service log)\b/i },
+];
 
 function resolvePriorityLevel(urgencyScore) {
   const score = Number(urgencyScore) || 0;
+  if (score >= CRITICAL_URGENCY_THRESHOLD) return 'critical';
   if (score >= HIGH_URGENCY_THRESHOLD) return 'high';
   if (score >= 4) return 'medium';
   return 'low';
 }
 
-function shouldSendPriorityPush(triage) {
-  if (!triage) return false;
-  if (triage.category !== 'action_required') return false;
-  return resolvePriorityLevel(triage.urgencyScore) === 'high';
+function buildMessageHaystack(notification) {
+  return [
+    notification.rawText,
+    notification.sender,
+    notification.channelName,
+    notification.triage?.cleanSummary,
+    notification.triage?.suggestedReply,
+    notification.triage?.category,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+function inferProjectName(notification) {
+  const haystack = buildMessageHaystack(notification);
+  for (const hint of PROJECT_HINTS) {
+    if (hint.pattern.test(haystack)) {
+      return hint.key;
+    }
+  }
+  return 'Shadow Inbox';
+}
+
+function detectPriorityAlertKind(notification) {
+  const haystack = buildMessageHaystack(notification);
+  const triage = notification?.triage;
+
+  if (CRASH_ALERT_PATTERN.test(haystack)) {
+    return 'crash_alert';
+  }
+
+  if (SERVER_FAILURE_PATTERN.test(haystack)) {
+    return 'server_failure';
+  }
+
+  if (triage?.category === 'action_required') {
+    const level = resolvePriorityLevel(triage.urgencyScore);
+    if (level === 'critical' || level === 'high') {
+      return 'high_priority';
+    }
+  }
+
+  return null;
+}
+
+async function detectRuleTriggeredKind(notification) {
+  try {
+    const rule = await findMatchingRule(notification);
+    if (!rule || rule.enabled === false) {
+      return null;
+    }
+
+    if (/critical|urgent|pager|incident|crash|outage/i.test(rule.name)) {
+      return 'rule_trigger';
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function shouldSendPriorityPush(notification) {
+  return Boolean(detectPriorityAlertKind(notification));
 }
 
 function formatAccountName(accountKey) {
@@ -39,23 +114,68 @@ function parseSenderDisplayName(sender) {
   return email?.[0] ?? value;
 }
 
-function buildPriorityPushContent(notification, accountKey) {
+function buildPriorityPushContent(notification, accountKey, alertKind = 'high_priority') {
   const accountName = formatAccountName(accountKey);
   const senderName = parseSenderDisplayName(notification.sender);
-  const reason =
+  const projectName = inferProjectName(notification);
+  const summary =
     notification.triage?.cleanSummary?.trim() ||
+    String(notification.rawText || '').slice(0, 160).trim() ||
     'Requires your immediate attention.';
 
+  let title = `🚨 High Priority ${accountName}`;
+  let body = `From: ${senderName}: ${summary}`;
+
+  switch (alertKind) {
+    case 'crash_alert':
+      title = `🔴 Critical Crash Log: ${projectName}`;
+      body = `${senderName}: ${summary}`;
+      break;
+    case 'server_failure':
+      title = `🔴 Server Failure Alert: ${projectName}`;
+      body = `${senderName}: ${summary}`;
+      break;
+    case 'rule_trigger':
+      title = `⚡ Priority Rule Triggered`;
+      body = `${projectName} · ${senderName}: ${summary}`;
+      break;
+    case 'high_priority':
+    default:
+      title = `🚨 High Priority ${accountName}`;
+      body = `From: ${senderName}: ${summary}`;
+      break;
+  }
+
   return {
-    title: `🚨 High Priority ${accountName}`,
-    body: `From: ${senderName}: ${reason}`,
+    title,
+    body,
     data: {
       notificationId: notification.id,
       accountKey,
       category: notification.triage?.category ?? null,
       urgencyScore: notification.triage?.urgencyScore ?? null,
-      priorityLevel: 'high',
+      priorityLevel: alertKind === 'high_priority' ? 'high' : 'critical',
+      alertKind,
+      projectName,
     },
+  };
+}
+
+function buildExpoPushMessage(token, content) {
+  const isCritical = content.data.priorityLevel === 'critical';
+
+  return {
+    to: token,
+    title: content.title,
+    body: content.body,
+    sound: 'default',
+    priority: 'high',
+    channelId: ANDROID_CHANNEL_ID,
+    badge: isCritical ? 1 : undefined,
+    data: content.data,
+    ...(isCritical && {
+      _displayInForeground: true,
+    }),
   };
 }
 
@@ -94,38 +214,37 @@ async function sendExpoPushMessages(messages) {
 }
 
 async function maybeSendPriorityPush(accountKey, notification) {
-  const triage = notification?.triage;
-  if (!shouldSendPriorityPush(triage)) {
-    return { sent: false, suppressed: true, reason: 'not_high_priority_action_required' };
+  let alertKind = detectPriorityAlertKind(notification);
+
+  if (!alertKind) {
+    alertKind = await detectRuleTriggeredKind(notification);
+  }
+
+  if (!alertKind) {
+    return { sent: false, suppressed: true, reason: 'not_priority_alert' };
   }
 
   if (hasBeenPushAlerted(notification.id)) {
     return { sent: false, suppressed: true, reason: 'already_alerted' };
   }
 
-  const tokens = listDevicePushTokens();
-  if (tokens.length === 0) {
+  const tokens = await listDevicePushTokens(accountKey);
+  const fallbackTokens = tokens.length > 0 ? tokens : await listDevicePushTokens();
+
+  if (fallbackTokens.length === 0) {
     return { sent: false, suppressed: true, reason: 'no_registered_devices' };
   }
 
-  const content = buildPriorityPushContent(notification, accountKey);
-  const messages = tokens.map((token) => ({
-    to: token,
-    title: content.title,
-    body: content.body,
-    sound: 'default',
-    priority: 'high',
-    channelId: ANDROID_CHANNEL_ID,
-    data: content.data,
-  }));
+  const content = buildPriorityPushContent(notification, accountKey, alertKind);
+  const messages = fallbackTokens.map((token) => buildExpoPushMessage(token, content));
 
   try {
     const result = await sendExpoPushMessages(messages);
     markPushAlerted(notification.id);
     console.log(
-      `[Push][${accountKey}] Sent high-priority alert for ${notification.id} to ${result.sent} device(s).`,
+      `[Push][${accountKey}] Sent ${alertKind} alert for ${notification.id} to ${result.sent} device(s).`,
     );
-    return { sent: true, ...result, content };
+    return { sent: true, alertKind, ...result, content };
   } catch (error) {
     console.error(`[Push][${accountKey}] Failed for ${notification.id}:`, error);
     return {
@@ -150,8 +269,10 @@ function formatPlatformLabel(sourceApp) {
 }
 
 async function sendAutoPilotPush(accountKey, notification, rule, historyEntry) {
-  const tokens = listDevicePushTokens();
-  if (tokens.length === 0) {
+  const tokens = await listDevicePushTokens(accountKey);
+  const fallbackTokens = tokens.length > 0 ? tokens : await listDevicePushTokens();
+
+  if (fallbackTokens.length === 0) {
     return { sent: false, suppressed: true, reason: 'no_registered_devices' };
   }
 
@@ -159,7 +280,7 @@ async function sendAutoPilotPush(accountKey, notification, rule, historyEntry) {
   const title = '🤖 Auto-Pilot';
   const body = `Handled routine ping from ${platform}. ${historyEntry.summary}`;
 
-  const messages = tokens.map((token) => ({
+  const messages = fallbackTokens.map((token) => ({
     to: token,
     title,
     body,
@@ -194,7 +315,9 @@ async function sendAutoPilotPush(accountKey, notification, rule, historyEntry) {
 module.exports = {
   ANDROID_CHANNEL_ID,
   HIGH_URGENCY_THRESHOLD,
+  CRITICAL_URGENCY_THRESHOLD,
   resolvePriorityLevel,
+  detectPriorityAlertKind,
   shouldSendPriorityPush,
   buildPriorityPushContent,
   maybeSendPriorityPush,

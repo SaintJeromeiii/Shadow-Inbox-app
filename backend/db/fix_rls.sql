@@ -4,3 +4,4 @@
 alter table public.notification_feed disable row level security;
 alter table public.finance_transactions disable row level security;
 alter table public.auto_pilot_rules disable row level security;
+alter table public.expo_push_tokens disable row level security;

@@ -85,7 +85,20 @@ insert into public.auto_pilot_rules (
   )
 on conflict (id) do nothing;
 
+create table if not exists public.expo_push_tokens (
+  token text primary key,
+  account_key text,
+  platform text,
+  device_name text,
+  registered_at timestamptz not null default now(),
+  last_seen_at timestamptz not null default now()
+);
+
+create index if not exists idx_expo_push_tokens_account
+  on public.expo_push_tokens (account_key, last_seen_at desc);
+
 -- Backend uses the service role key server-side. Disable RLS so inserts succeed.
 alter table public.notification_feed disable row level security;
 alter table public.finance_transactions disable row level security;
 alter table public.auto_pilot_rules disable row level security;
+alter table public.expo_push_tokens disable row level security;

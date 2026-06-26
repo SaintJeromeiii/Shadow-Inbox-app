@@ -40,6 +40,7 @@ const emailsRouter = require('../backend/routes/emails');
 const broadcastRouter = require('../backend/routes/broadcast');
 const autoPilotRouter = require('../backend/routes/autoPilot');
 const financesRouter = require('../backend/routes/finances');
+const notificationsRouter = require('../backend/routes/notifications');
 const { handleSlackWebhook } = require('../backend/slackWebhook');
 
 const knowledgeBase = loadKnowledgeBase();
@@ -137,6 +138,7 @@ app.use('/api/emails', emailsRouter);
 app.use('/api/broadcast', broadcastRouter);
 app.use('/api/auto-pilot', autoPilotRouter);
 app.use('/api/finances', financesRouter);
+app.use('/api/notifications', notificationsRouter);
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', service: 'shadow-inbox-email-relay' });
@@ -146,11 +148,13 @@ app.get('/api/accounts', (_req, res) => {
   res.json({ accounts: listAccounts() });
 });
 
-app.post('/api/devices/register', (req, res) => {
+app.post('/api/devices/register', async (req, res) => {
+  const accountKey = getAccountKeyFromRequest(req);
   const { pushToken, platform, deviceName } = req.body ?? {};
 
   try {
-    const registeredDevices = registerDevicePushToken(pushToken, {
+    const registeredDevices = await registerDevicePushToken(pushToken, {
+      accountKey,
       platform,
       deviceName,
     });
@@ -159,7 +163,7 @@ app.post('/api/devices/register', (req, res) => {
       `[Relay] Registered push device (${platform || 'unknown'}) — ${registeredDevices} total.`,
     );
 
-    res.json({ success: true, registeredDevices });
+    res.json({ success: true, registeredDevices, accountKey });
   } catch (error) {
     res.status(400).json({
       error: error instanceof Error ? error.message : 'Failed to register device.',
@@ -167,16 +171,14 @@ app.post('/api/devices/register', (req, res) => {
   }
 });
 
-app.post('/api/devices/unregister', (req, res) => {
+app.post('/api/devices/unregister', async (req, res) => {
   const { pushToken } = req.body ?? {};
 
   try {
-    const removed = removeDevicePushToken(pushToken);
-    res.json({
-      success: true,
-      removed,
-      registeredDevices: listDevicePushTokens().length,
-    });
+    const removed = await removeDevicePushToken(pushToken);
+    const registeredDevices = (await listDevicePushTokens()).length;
+
+    res.json({ success: true, removed, registeredDevices });
   } catch (error) {
     res.status(400).json({
       error: error instanceof Error ? error.message : 'Failed to unregister device.',

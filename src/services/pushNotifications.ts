@@ -1,9 +1,10 @@
 import { Alert, Platform } from 'react-native';
 import Constants from 'expo-constants';
+import * as Device from 'expo-device';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import type { TriagedNotification } from '../types/notification';
-import { getRelayUrl } from './emailService';
+import { getActiveAccountKey, getRelayUrl } from './emailService';
 
 const ALERTED_IDS_KEY = '@shadow_inbox/alerted_action_ids';
 const PUSH_TOKEN_KEY = '@shadow_inbox/expo_push_token';
@@ -53,19 +54,25 @@ export async function ensureAndroidNotificationChannel(): Promise<void> {
   await Notifications.setNotificationChannelAsync(ANDROID_HIGH_PRIORITY_CHANNEL_ID, {
     name: 'High Priority Alerts',
     description: 'Critical Shadow Inbox emails that need immediate attention',
-    importance: Notifications.AndroidImportance.HIGH,
+    importance: Notifications.AndroidImportance.MAX,
     vibrationPattern: [0, 280, 180, 280],
     lightColor: '#FF6B6B',
     sound: 'default',
     enableVibrate: true,
     showBadge: true,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+    bypassDnd: true,
   });
 }
 
 export async function requestNotificationPermissions(): Promise<boolean> {
   if (getNotificationMode() === 'expo-go-fallback') {
     return true;
+  }
+
+  if (!Device.isDevice) {
+    console.warn('[Shadow Inbox] Push notifications require a physical device.');
+    return false;
   }
 
   await ensureAndroidNotificationChannel();
@@ -99,6 +106,10 @@ export async function getDevicePushToken(): Promise<string | null> {
     return null;
   }
 
+  if (!Device.isDevice) {
+    return null;
+  }
+
   const granted = await requestNotificationPermissions();
   if (!granted) return null;
 
@@ -112,7 +123,7 @@ export async function getDevicePushToken(): Promise<string | null> {
   return token.data;
 }
 
-export async function registerDeviceWithRelay(): Promise<boolean> {
+export async function registerDeviceWithRelay(accountKey?: string): Promise<boolean> {
   if (getNotificationMode() === 'expo-go-fallback') {
     return false;
   }
@@ -126,13 +137,18 @@ export async function registerDeviceWithRelay(): Promise<boolean> {
       await unregisterDeviceFromRelay(previousToken);
     }
 
-    const response = await fetch(`${getRelayUrl()}/api/devices/register`, {
+    const resolvedAccountKey = accountKey ?? getActiveAccountKey();
+    const response = await fetch(`${getRelayUrl()}/api/notifications/register-token`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Account-Key': resolvedAccountKey,
+      },
       body: JSON.stringify({
         pushToken,
         platform: Platform.OS,
-        deviceName: Constants.deviceName ?? null,
+        deviceName: Device.modelName ?? Constants.deviceName ?? null,
+        accountKey: resolvedAccountKey,
       }),
     });
 
@@ -151,7 +167,7 @@ export async function registerDeviceWithRelay(): Promise<boolean> {
 
 export async function unregisterDeviceFromRelay(pushToken: string): Promise<void> {
   try {
-    await fetch(`${getRelayUrl()}/api/devices/unregister`, {
+    await fetch(`${getRelayUrl()}/api/notifications/unregister-token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pushToken }),
@@ -228,7 +244,7 @@ export async function scheduleActionRequiredAlert(
         title,
         body,
         sound: true,
-        priority: Notifications.AndroidNotificationPriority.HIGH,
+        priority: Notifications.AndroidNotificationPriority.MAX,
         ...(Platform.OS === 'android' && {
           channelId: ANDROID_HIGH_PRIORITY_CHANNEL_ID,
         }),

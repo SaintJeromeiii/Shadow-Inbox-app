@@ -48,6 +48,7 @@ module.exports = {
     },
     android: {
       package: 'com.saintjeromeiii.shadowinbox',
+      googleServicesFile: './google-services.json',
       usesCleartextTraffic: true,
       adaptiveIcon: {
         backgroundColor: '#E6F4FE',
@@ -65,7 +66,8 @@ module.exports = {
       [
         'expo-notifications',
         {
-          color: '#5B8DEF',
+          icon: './assets/notification-icon.png',
+          color: '#ffffff',
         },
       ],
       'expo-web-browser',
