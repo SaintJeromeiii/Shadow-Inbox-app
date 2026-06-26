@@ -27,17 +27,24 @@ import {
   saveNotifications,
   clearPersistedNotifications,
 } from '../services/notificationStorage';
-import { sendReply, archiveEmails, trashEmails, syncShadowLabels } from '../services/emailService';
+import { sendReply, archiveEmails, trashEmails, syncShadowLabels, redraftEmailReply } from '../services/emailService';
+import type { ReplyTone } from '../types/replyTone';
 import {
   alertNewActionRequiredItems,
   loadAlertedActionIds,
+  registerDeviceWithRelay,
   requestNotificationPermissions,
 } from '../services/pushNotifications';
 import { useAccount } from '../context/AccountContext';
 import AccountSwitcherSheet from '../components/AccountSwitcherSheet';
 import BriefingCard from '../components/BriefingCard';
+import TaskBoard from '../components/TaskBoard';
+import FinanceRunwayStrip from '../components/FinanceRunwayStrip';
+import KnowledgeScreen from '../screens/KnowledgeScreen';
+import AutoPilotScreen from '../screens/AutoPilotScreen';
 import { useGoogleSignIn } from '../hooks/useGoogleSignIn';
 import { removeRelayAccount } from '../services/authService';
+import { hideAccountOnDevice, unhideAccountOnDevice } from '../services/accountStorage';
 import {
   dismissBriefingForToday,
   fetchDailyBriefing,
@@ -47,6 +54,14 @@ import type { AccountKey } from '../types/account';
 import type { AccountProfile } from '../types/account';
 import type { DailyBriefing } from '../types/briefing';
 import type { FeedTab, TriagedNotification } from '../types/notification';
+import type { ExtractedTask } from '../types/task';
+import {
+  fetchExtractedTasks,
+  toggleExtractedTask,
+} from '../services/taskService';
+import { fetchFinanceSummary } from '../services/financeService';
+import type { FinanceSummary } from '../types/finance';
+import { sendVoiceCommand } from '../services/voiceCommandService';
 
 const TABS: { key: FeedTab; label: string }[] = [
   { key: 'action_required', label: 'Action Required' },
@@ -129,9 +144,17 @@ export default function HomeScreen() {
   const [briefingLoading, setBriefingLoading] = useState(false);
   const [briefingError, setBriefingError] = useState<string | null>(null);
   const [briefingHidden, setBriefingHidden] = useState(false);
+  const [tasks, setTasks] = useState<ExtractedTask[]>([]);
+  const [tasksLoading, setTasksLoading] = useState(false);
+  const [financeSummary, setFinanceSummary] = useState<FinanceSummary | null>(null);
+  const [financeLoading, setFinanceLoading] = useState(false);
+  const [focusEmailId, setFocusEmailId] = useState<string | null>(null);
+  const [knowledgeVisible, setKnowledgeVisible] = useState(false);
+  const [autoPilotVisible, setAutoPilotVisible] = useState(false);
   const skipNextSave = useRef(true);
   const alertedActionIdsRef = useRef<Set<string>>(new Set());
   const loadingAccountRef = useRef<AccountKey | null>(null);
+  const flatListRef = useRef<FlatList<TriagedNotification>>(null);
 
   const dataSource = getNotificationDataSource(activeAccount);
   const triageMode = getTriageMode();
@@ -159,6 +182,10 @@ export default function HomeScreen() {
 
       setNotificationsEnabled(granted);
       alertedActionIdsRef.current = await loadAlertedActionIds();
+
+      if (granted) {
+        await registerDeviceWithRelay();
+      }
     }
 
     void setupNotifications();
@@ -174,9 +201,14 @@ export default function HomeScreen() {
     let cancelled = false;
 
     async function watchForActionRequired() {
+      const accountLabel =
+        activeProfile.label.replace(/\s+Account$/i, '').trim() ||
+        activeProfile.label;
+
       const updatedIds = await alertNewActionRequiredItems(
         notifications,
         alertedActionIdsRef.current,
+        accountLabel,
       );
 
       if (!cancelled) {
@@ -189,7 +221,7 @@ export default function HomeScreen() {
     return () => {
       cancelled = true;
     };
-  }, [notifications, hydrated, notificationsEnabled]);
+  }, [notifications, hydrated, notificationsEnabled, activeProfile.label]);
 
   const reloadInboxFromSource = useCallback(
     async (accountKey: AccountKey, sync = true): Promise<TriagedNotification[]> => {
@@ -289,6 +321,36 @@ export default function HomeScreen() {
     [gatherTriageSnapshot],
   );
 
+  const loadTasks = useCallback(async () => {
+    setTasksLoading(true);
+    try {
+      const fetched = await fetchExtractedTasks();
+      setTasks(fetched);
+    } catch (error) {
+      console.warn('[Shadow Inbox] Task fetch failed:', error);
+    } finally {
+      setTasksLoading(false);
+    }
+  }, []);
+
+  const loadFinances = useCallback(async (accountKey?: AccountKey) => {
+    setFinanceLoading(true);
+    try {
+      const summary = await fetchFinanceSummary(accountKey ?? activeAccount);
+      setFinanceSummary(summary);
+    } catch (error) {
+      console.warn('[Shadow Inbox] Finance summary failed:', error);
+    } finally {
+      setFinanceLoading(false);
+    }
+  }, [activeAccount]);
+
+  useEffect(() => {
+    if (!accountReady) return;
+    void loadTasks();
+    void loadFinances();
+  }, [accountReady, loadTasks, loadFinances]);
+
   useEffect(() => {
     if (!accountReady) return;
 
@@ -299,6 +361,8 @@ export default function HomeScreen() {
       if (!dismissed) {
         await refreshBriefing(merged);
       }
+      await loadTasks();
+      await loadFinances();
     })();
     // Initial inbox load only — account switches reload via handleSelectAccount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -325,10 +389,12 @@ export default function HomeScreen() {
     try {
       const merged = await applyInboxReload(activeAccount, true);
       await refreshBriefing(merged);
+      await loadTasks();
+      await loadFinances();
     } finally {
       setRefreshing(false);
     }
-  }, [activeAccount, applyInboxReload, refreshBriefing]);
+  }, [activeAccount, applyInboxReload, refreshBriefing, loadTasks, loadFinances]);
 
   const handleSelectAccount = useCallback(
     async (accountKey: AccountKey) => {
@@ -340,85 +406,105 @@ export default function HomeScreen() {
       try {
         const merged = await applyInboxReload(accountKey, true);
         await refreshBriefing(merged);
+        await loadFinances(accountKey);
       } finally {
         setRefreshing(false);
       }
     },
-    [activeAccount, applyInboxReload, refreshBriefing, setActiveAccount],
+    [activeAccount, applyInboxReload, refreshBriefing, setActiveAccount, loadFinances],
   );
 
   const handleGoogleAccountLinked = useCallback(
     async (account: AccountProfile) => {
       setAccountSheetVisible(false);
+      await unhideAccountOnDevice(account.key);
       await refreshAccounts();
       await setActiveAccount(account.key);
       setRefreshing(true);
       try {
         const merged = await applyInboxReload(account.key, true);
         await refreshBriefing(merged);
+        await loadFinances(account.key);
       } finally {
         setRefreshing(false);
       }
     },
-    [applyInboxReload, refreshAccounts, refreshBriefing, setActiveAccount],
+    [applyInboxReload, refreshAccounts, refreshBriefing, setActiveAccount, loadFinances],
   );
+
+  const { signInWithGoogle, signOutFromGoogle, isSigningIn: isGoogleSigningIn } =
+    useGoogleSignIn({
+      onSuccess: handleGoogleAccountLinked,
+    });
 
   const handleRemoveAccount = useCallback(
     (account: AccountProfile) => {
-      if (!account.oauth) return;
+      const isOAuthAccount = Boolean(account.oauth);
+      const title = isOAuthAccount ? 'Disconnect Google Account' : 'Sign Out';
+      const message = isOAuthAccount
+        ? `Disconnect ${account.email} from Shadow Inbox? This removes stored OAuth tokens and the local feed on your Mac relay.`
+        : `Sign out of ${account.label} on this device? IMAP credentials stay on your Mac relay (.env) — this only hides the inbox here and clears cached messages.`;
 
-      Alert.alert(
-        'Remove Google Account',
-        `Disconnect ${account.email} from Shadow Inbox? This removes stored OAuth tokens and the local feed on your Mac relay.`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Remove',
-            style: 'destructive',
-            onPress: () => {
-              void (async () => {
-                setRemovingAccountKey(account.key);
-                try {
+      Alert.alert(title, message, [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: isOAuthAccount ? 'Disconnect' : 'Sign Out',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              setRemovingAccountKey(account.key);
+              try {
+                if (isOAuthAccount) {
                   const result = await removeRelayAccount(account.key);
                   if (!result.success) {
                     Alert.alert(
-                      'Remove Failed',
+                      'Disconnect Failed',
                       result.error ?? 'Could not remove this account from the relay.',
                     );
                     return;
                   }
+                  await signOutFromGoogle();
+                } else {
+                  await hideAccountOnDevice(account.key);
+                }
 
-                  await clearPersistedNotifications(account.key);
-                  await refreshAccounts();
-                  setAccountSheetVisible(false);
+                await clearPersistedNotifications(account.key);
+                const remaining = await refreshAccounts();
+                setAccountSheetVisible(false);
 
-                  if (activeAccount === account.key) {
-                    await setActiveAccount('personal');
+                if (activeAccount === account.key) {
+                  const nextAccount = remaining[0]?.key ?? 'personal';
+                  await setActiveAccount(nextAccount);
+                  if (remaining.length > 0) {
                     setRefreshing(true);
                     try {
-                      const merged = await applyInboxReload('personal', false);
+                      const merged = await applyInboxReload(nextAccount, false);
                       await refreshBriefing(merged);
                     } finally {
                       setRefreshing(false);
                     }
                   } else {
-                    await refreshBriefing();
+                    setNotifications([]);
+                    setDraftTexts({});
+                    setLastUpdated(null);
                   }
-                } catch (error) {
-                  Alert.alert(
-                    'Remove Failed',
-                    error instanceof Error
-                      ? error.message
-                      : 'Could not remove this account.',
-                  );
-                } finally {
-                  setRemovingAccountKey(null);
+                } else {
+                  await refreshBriefing();
                 }
-              })();
-            },
+              } catch (error) {
+                Alert.alert(
+                  isOAuthAccount ? 'Disconnect Failed' : 'Sign Out Failed',
+                  error instanceof Error
+                    ? error.message
+                    : 'Could not remove this account.',
+                );
+              } finally {
+                setRemovingAccountKey(null);
+              }
+            })();
           },
-        ],
-      );
+        },
+      ]);
     },
     [
       activeAccount,
@@ -426,12 +512,9 @@ export default function HomeScreen() {
       refreshAccounts,
       refreshBriefing,
       setActiveAccount,
+      signOutFromGoogle,
     ],
   );
-
-  const { signInWithGoogle, isSigningIn: isGoogleSigningIn } = useGoogleSignIn({
-    onSuccess: handleGoogleAccountLinked,
-  });
 
   const unreadCount = useMemo(
     () => notifications.filter((n) => !n.triage && !n.archived).length,
@@ -474,6 +557,20 @@ export default function HomeScreen() {
 
   const showBulkSend = actionRequiredItems.length >= 2;
 
+  useEffect(() => {
+    if (!focusEmailId) return;
+
+    const index = filteredNotifications.findIndex((item) => item.id === focusEmailId);
+    if (index < 0) return;
+
+    const timeoutId = setTimeout(() => {
+      flatListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.2 });
+      setFocusEmailId(null);
+    }, 120);
+
+    return () => clearTimeout(timeoutId);
+  }, [focusEmailId, filteredNotifications]);
+
   const removeNotificationsFromFeed = useCallback((ids: string[]) => {
     const idSet = new Set(ids);
     setRemovingIds((prev) => new Set([...prev, ...ids]));
@@ -501,6 +598,187 @@ export default function HomeScreen() {
   const handleDraftChange = useCallback((id: string, text: string) => {
     setDraftTexts((prev) => ({ ...prev, [id]: text }));
   }, []);
+
+  const handleToggleTask = useCallback(
+    async (task: ExtractedTask) => {
+      setTasks((prev) =>
+        prev.map((item) =>
+          item.id === task.id
+            ? {
+                ...item,
+                completed: !item.completed,
+                completedAt: !item.completed ? new Date().toISOString() : null,
+              }
+            : item,
+        ),
+      );
+
+      try {
+        const result = await toggleExtractedTask(task.id);
+        setTasks((prev) =>
+          prev.map((item) => (item.id === task.id ? result.task : item)),
+        );
+
+        if (result.archived && result.task.emailId) {
+          removeNotificationsFromFeed([result.task.emailId]);
+        }
+
+        if (result.archiveError) {
+          Alert.alert(
+            'Task Completed — Archive Pending',
+            result.archiveError,
+          );
+        }
+      } catch (error) {
+        setTasks((prev) =>
+          prev.map((item) => (item.id === task.id ? task : item)),
+        );
+        Alert.alert(
+          'Task Sync Failed',
+          error instanceof Error
+            ? error.message
+            : 'Could not update task on the relay.',
+        );
+      }
+    },
+    [removeNotificationsFromFeed],
+  );
+
+  const handleJumpToEmail = useCallback(
+    async (emailId: string) => {
+      const task = tasks.find((item) => item.emailId === emailId);
+      const accountKey = task?.accountKey ?? activeAccount;
+
+      if (accountKey !== activeAccount) {
+        await setActiveAccount(accountKey);
+        await applyInboxReload(accountKey, false);
+      }
+
+      setActiveTab('action_required');
+      setFocusEmailId(emailId);
+    },
+    [tasks, activeAccount, setActiveAccount, applyInboxReload],
+  );
+
+  const feedListHeader = useMemo(
+    () => (
+      <View style={styles.feedListHeader}>
+        {!briefingHidden && (
+          <BriefingCard
+            briefing={briefing}
+            loading={briefingLoading}
+            error={briefingError}
+            onDismiss={() => void handleDismissBriefing()}
+          />
+        )}
+
+        <TaskBoard
+          tasks={tasks}
+          loading={tasksLoading}
+          onToggleTask={handleToggleTask}
+          onJumpToEmail={(emailId) => void handleJumpToEmail(emailId)}
+        />
+
+        <FinanceRunwayStrip summary={financeSummary} loading={financeLoading} />
+
+        <View style={styles.tabBar}>
+          {TABS.map((tab) => {
+            const isActive = activeTab === tab.key;
+            return (
+              <Pressable
+                key={tab.key}
+                style={[styles.tab, isActive && styles.tabActive]}
+                onPress={() => setActiveTab(tab.key)}
+              >
+                <Text style={[styles.tabLabel, isActive && styles.tabLabelActive]}>
+                  {tab.label}
+                </Text>
+                <View style={[styles.tabBadge, isActive && styles.tabBadgeActive]}>
+                  <Text
+                    style={[
+                      styles.tabBadgeText,
+                      isActive && styles.tabBadgeTextActive,
+                    ]}
+                  >
+                    {tabCounts[tab.key]}
+                  </Text>
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+    ),
+    [
+      activeTab,
+      briefing,
+      briefingError,
+      briefingHidden,
+      briefingLoading,
+      handleDismissBriefing,
+      handleJumpToEmail,
+      handleToggleTask,
+      tabCounts,
+      tasks,
+      tasksLoading,
+      financeSummary,
+      financeLoading,
+    ],
+  );
+
+  const handleRedraft = useCallback(
+    async (
+      notification: TriagedNotification,
+      tone: ReplyTone,
+      currentDraft: string,
+    ) => {
+      const result = await redraftEmailReply({
+        emailId: notification.id,
+        originalMessage: notification.rawText,
+        currentDraft,
+        tone,
+      });
+
+      if (!result.success || !result.draft) {
+        throw new Error(result.error ?? 'Could not redraft reply.');
+      }
+
+      setDraftTexts((prev) => ({
+        ...prev,
+        [notification.id]: result.draft!,
+      }));
+
+      return result.draft;
+    },
+    [],
+  );
+
+  const handleVoiceCommand = useCallback(
+    async (
+      notification: TriagedNotification,
+      audioUri: string,
+      currentDraft: string,
+    ) => {
+      const result = await sendVoiceCommand({
+        emailId: notification.id,
+        originalMessage: notification.rawText,
+        currentDraft,
+        audioUri,
+      });
+
+      if (!result.success || !result.draft) {
+        throw new Error(result.error ?? 'Could not process voice command.');
+      }
+
+      setDraftTexts((prev) => ({
+        ...prev,
+        [notification.id]: result.draft!,
+      }));
+
+      return result.draft;
+    },
+    [],
+  );
 
   const handleGmailArchive = useCallback(
     async (notification: TriagedNotification) => {
@@ -771,6 +1049,26 @@ export default function HomeScreen() {
         <View style={styles.headerActions}>
           <Pressable
             style={({ pressed }) => [
+              styles.knowledgePill,
+              pressed && styles.knowledgePillPressed,
+            ]}
+            onPress={() => setAutoPilotVisible(true)}
+            accessibilityLabel="Open auto-pilot rules"
+          >
+            <Text style={styles.knowledgePillEmoji}>🤖</Text>
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [
+              styles.knowledgePill,
+              pressed && styles.knowledgePillPressed,
+            ]}
+            onPress={() => setKnowledgeVisible(true)}
+            accessibilityLabel="Open core knowledge base"
+          >
+            <Text style={styles.knowledgePillEmoji}>🧠</Text>
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [
               styles.accountPill,
               { borderColor: activeProfile.accentColor },
               pressed && styles.accountPillPressed,
@@ -820,6 +1118,16 @@ export default function HomeScreen() {
         onClose={() => setAccountSheetVisible(false)}
       />
 
+      <KnowledgeScreen
+        visible={knowledgeVisible}
+        onClose={() => setKnowledgeVisible(false)}
+      />
+
+      <AutoPilotScreen
+        visible={autoPilotVisible}
+        onClose={() => setAutoPilotVisible(false)}
+      />
+
       {showBulkSend && (
         <View style={styles.bulkBar}>
           <Pressable
@@ -844,45 +1152,18 @@ export default function HomeScreen() {
         </View>
       )}
 
-      {!briefingHidden && (
-        <BriefingCard
-          briefing={briefing}
-          loading={briefingLoading}
-          error={briefingError}
-          onDismiss={() => void handleDismissBriefing()}
-        />
-      )}
-
-      <View style={styles.tabBar}>
-        {TABS.map((tab) => {
-          const isActive = activeTab === tab.key;
-          return (
-            <Pressable
-              key={tab.key}
-              style={[styles.tab, isActive && styles.tabActive]}
-              onPress={() => setActiveTab(tab.key)}
-            >
-              <Text style={[styles.tabLabel, isActive && styles.tabLabelActive]}>
-                {tab.label}
-              </Text>
-              <View style={[styles.tabBadge, isActive && styles.tabBadgeActive]}>
-                <Text
-                  style={[
-                    styles.tabBadgeText,
-                    isActive && styles.tabBadgeTextActive,
-                  ]}
-                >
-                  {tabCounts[tab.key]}
-                </Text>
-              </View>
-            </Pressable>
-          );
-        })}
-      </View>
-
       <FlatList
+        ref={flatListRef}
+        style={styles.feedList}
         data={filteredNotifications}
         keyExtractor={(item) => item.id}
+        ListHeaderComponent={feedListHeader}
+        onScrollToIndexFailed={(info) => {
+          flatListRef.current?.scrollToOffset({
+            offset: Math.max(0, info.averageItemLength * info.index),
+            animated: true,
+          });
+        }}
         renderItem={({ item }) => (
           <FeedCard
             notification={item}
@@ -890,6 +1171,8 @@ export default function HomeScreen() {
               draftTexts[item.id] ?? item.triage?.suggestedReply ?? ''
             }
             onDraftChange={handleDraftChange}
+            onRedraft={handleRedraft}
+            onVoiceCommand={handleVoiceCommand}
             onGmailArchive={handleGmailArchive}
             onTrash={handleTrash}
             onSendReply={handleSendReply}
@@ -947,6 +1230,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 8,
+  },
+  knowledgePill: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#161922',
+    borderWidth: 1,
+    borderColor: 'rgba(167, 139, 250, 0.35)',
+  },
+  knowledgePillPressed: {
+    opacity: 0.85,
+  },
+  knowledgePillEmoji: {
+    fontSize: 20,
   },
   accountPill: {
     width: 44,
@@ -1114,9 +1413,8 @@ const styles = StyleSheet.create({
   },
   tabBar: {
     flexDirection: 'row',
-    paddingHorizontal: 16,
     gap: 8,
-    marginBottom: 16,
+    marginBottom: 12,
   },
   tab: {
     flex: 1,
@@ -1165,6 +1463,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 32,
     flexGrow: 1,
+  },
+  feedList: {
+    flex: 1,
+  },
+  feedListHeader: {
+    gap: 0,
+    marginBottom: 4,
   },
   emptyState: {
     flex: 1,

@@ -127,8 +127,8 @@ async function ensureShadowLabelSet(accountKey) {
 }
 
 async function resolveNotificationMessageId(accountKey, notification) {
-  if (notification.gmailMessageId) {
-    return notification.gmailMessageId;
+  if (notification.gmailApiMessageId) {
+    return notification.gmailApiMessageId;
   }
 
   const account = getAccount(resolveAccountKey(accountKey));
@@ -136,6 +136,7 @@ async function resolveNotificationMessageId(accountKey, notification) {
     return null;
   }
 
+  // notification.gmailMessageId is IMAP X-GM-MSGID — not valid for Gmail REST API calls.
   return resolveGmailMessageId(accountKey, {
     messageIdHeader: notification.messageIdHeader,
     subject: extractSubject(notification.rawText),
@@ -153,18 +154,20 @@ async function applyShadowLabelsToNotification(accountKey, notification, triage)
       triage,
       shadowLabels,
       gmailMessageId: notification.gmailMessageId || null,
+      gmailApiMessageId: notification.gmailApiMessageId || null,
     };
   }
 
   await ensureShadowLabelSet(accountKey);
 
-  const gmailMessageId = await resolveNotificationMessageId(accountKey, notification);
-  if (!gmailMessageId) {
+  const gmailApiMessageId = await resolveNotificationMessageId(accountKey, notification);
+  if (!gmailApiMessageId) {
     return {
       ...notification,
       triage,
       shadowLabels,
-      gmailMessageId: null,
+      gmailMessageId: notification.gmailMessageId || null,
+      gmailApiMessageId: null,
     };
   }
 
@@ -187,7 +190,7 @@ async function applyShadowLabelsToNotification(accountKey, notification, triage)
     }
   }
 
-  await modifyMessageLabels(accountKey, gmailMessageId, {
+  await modifyMessageLabels(accountKey, gmailApiMessageId, {
     addLabelIds,
     removeLabelIds,
   });
@@ -196,7 +199,8 @@ async function applyShadowLabelsToNotification(accountKey, notification, triage)
     ...notification,
     triage,
     shadowLabels,
-    gmailMessageId,
+    gmailMessageId: notification.gmailMessageId || null,
+    gmailApiMessageId,
   };
 }
 

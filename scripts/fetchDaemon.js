@@ -13,6 +13,7 @@ const cron = require('node-cron');
 const { fetchNotifications } = require('./fetchNotifications');
 const { loadKnowledgeBase } = require('../backend/knowledgeBase');
 const { listAccountKeys } = require('../backend/accounts');
+const { pollDiscordChannels } = require('../backend/discordPoll');
 
 const knowledgeBase = loadKnowledgeBase();
 console.log(
@@ -46,6 +47,13 @@ async function runCheck(trigger = 'scheduled') {
 
       console.log(
         `[Daemon][${accountKey}] ${stats.unreadTotal} unread — ${stats.newCount} new ${updateLabel}, ${stats.writtenCount} in feed.`,
+      );
+    }
+
+    const discordStats = await pollDiscordChannels();
+    if (discordStats.polled > 0) {
+      console.log(
+        `[Daemon][Discord] Polled ${discordStats.polled} channel(s) — ${discordStats.ingested} new message(s).`,
       );
     }
   } catch (error) {

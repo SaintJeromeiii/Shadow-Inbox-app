@@ -27,14 +27,25 @@ const { generateDailyBriefing } = require('../backend/briefingService');
 const { ensureShadowLabelSet } = require('../backend/shadowLabels');
 const { applyShadowLabelsToNotification } = require('../backend/shadowLabels');
 const { writeNotifications } = require('../backend/notificationFeed');
+const { redraftReply } = require('../backend/redraftService');
+const {
+  registerDevicePushToken,
+  removeDevicePushToken,
+  listDevicePushTokens,
+} = require('../backend/devicePushTokens');
+const { listTasks, toggleTaskComplete } = require('../backend/taskService');
+const knowledgeRouter = require('../backend/routes/knowledge');
+const calendarRouter = require('../backend/routes/calendar');
+const emailsRouter = require('../backend/routes/emails');
+const broadcastRouter = require('../backend/routes/broadcast');
+const autoPilotRouter = require('../backend/routes/autoPilot');
+const financesRouter = require('../backend/routes/finances');
+const { handleSlackWebhook } = require('../backend/slackWebhook');
 
 const knowledgeBase = loadKnowledgeBase();
 console.log(
   `[Relay] Smart Memory loaded (${knowledgeBase.length} chars from backend/knowledgebase.txt)`,
 );
-
-const PORT = Number(process.env.EMAIL_RELAY_PORT || 3000);
-const HOST = process.env.EMAIL_RELAY_HOST || '0.0.0.0';
 
 function requireEnv(name, value) {
   if (!value) {
@@ -93,7 +104,18 @@ async function createTransporter(accountKey) {
 
 const app = express();
 app.use(cors());
+app.post(
+  '/api/broadcast/webhooks/slack',
+  express.raw({ type: 'application/json' }),
+  handleSlackWebhook,
+);
 app.use(express.json({ limit: '1mb' }));
+app.use('/api/knowledge', knowledgeRouter);
+app.use('/api/calendar', calendarRouter);
+app.use('/api/emails', emailsRouter);
+app.use('/api/broadcast', broadcastRouter);
+app.use('/api/auto-pilot', autoPilotRouter);
+app.use('/api/finances', financesRouter);
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', service: 'shadow-inbox-email-relay' });
@@ -101,6 +123,82 @@ app.get('/health', (_req, res) => {
 
 app.get('/api/accounts', (_req, res) => {
   res.json({ accounts: listAccounts() });
+});
+
+app.post('/api/devices/register', (req, res) => {
+  const { pushToken, platform, deviceName } = req.body ?? {};
+
+  try {
+    const registeredDevices = registerDevicePushToken(pushToken, {
+      platform,
+      deviceName,
+    });
+
+    console.log(
+      `[Relay] Registered push device (${platform || 'unknown'}) — ${registeredDevices} total.`,
+    );
+
+    res.json({ success: true, registeredDevices });
+  } catch (error) {
+    res.status(400).json({
+      error: error instanceof Error ? error.message : 'Failed to register device.',
+    });
+  }
+});
+
+app.post('/api/devices/unregister', (req, res) => {
+  const { pushToken } = req.body ?? {};
+
+  try {
+    const removed = removeDevicePushToken(pushToken);
+    res.json({
+      success: true,
+      removed,
+      registeredDevices: listDevicePushTokens().length,
+    });
+  } catch (error) {
+    res.status(400).json({
+      error: error instanceof Error ? error.message : 'Failed to unregister device.',
+    });
+  }
+});
+
+app.get('/api/tasks', (req, res) => {
+  const accountKey = req.query?.accountKey
+    ? resolveAccountKey(String(req.query.accountKey))
+    : null;
+  const includeCompleted = String(req.query?.includeCompleted || 'false') === 'true';
+
+  const tasks = listTasks({
+    accountKey: accountKey || undefined,
+    includeCompleted,
+  });
+
+  res.json({ success: true, tasks });
+});
+
+app.post('/api/tasks/:id/toggle', async (req, res) => {
+  const taskId = req.params.id;
+  const archiveSource = req.body?.archiveSource !== false;
+
+  if (!taskId) {
+    res.status(400).json({ error: 'Missing task id.' });
+    return;
+  }
+
+  try {
+    const result = await toggleTaskComplete(taskId, { archiveSource });
+    res.json({
+      success: true,
+      task: result.task,
+      archived: result.archived,
+      archiveError: result.archiveError,
+    });
+  } catch (error) {
+    res.status(error.message?.includes('not found') ? 404 : 500).json({
+      error: error instanceof Error ? error.message : 'Failed to toggle task.',
+    });
+  }
 });
 
 function handleRemoveAccountRequest(req, res) {
@@ -206,7 +304,7 @@ app.get('/api/emails', async (req, res) => {
       await fetchNotifications({ accountKey, silent: true });
     }
 
-    const notifications = readNotifications(accountKey);
+    const notifications = await readNotifications(accountKey);
     const account = getAccount(accountKey);
 
     res.status(200).json({
@@ -259,7 +357,7 @@ app.post('/api/emails/sync-labels', async (req, res) => {
   }
 
   try {
-    const current = readNotifications(accountKey);
+    const current = await readNotifications(accountKey);
     const byId = new Map(current.map((item) => [item.id, item]));
     const updated = [];
 
@@ -276,7 +374,7 @@ app.post('/api/emails/sync-labels', async (req, res) => {
       updated.push(labeled);
     }
 
-    writeNotifications(accountKey, Array.from(byId.values()));
+    await writeNotifications(accountKey, Array.from(byId.values()));
 
     res.status(200).json({
       success: true,
@@ -292,9 +390,65 @@ app.post('/api/emails/sync-labels', async (req, res) => {
   }
 });
 
-function notificationsForIds(accountKey, ids) {
+app.post('/api/emails/redraft', async (req, res) => {
+  const {
+    emailId,
+    id,
+    originalMessage,
+    originalText,
+    currentDraft,
+    tone,
+  } = req.body ?? {};
+
+  const resolvedId = emailId || id;
+  const resolvedMessage = originalMessage || originalText;
+
+  if (!resolvedId || typeof resolvedId !== 'string') {
+    res.status(400).json({ error: 'Missing or invalid "emailId" field.' });
+    return;
+  }
+
+  if (!tone || typeof tone !== 'string') {
+    res.status(400).json({ error: 'Missing or invalid "tone" field.' });
+    return;
+  }
+
+  const normalizedTone = tone.toLowerCase();
+  if (normalizedTone !== 'quick_template' && (!currentDraft || typeof currentDraft !== 'string')) {
+    res.status(400).json({ error: 'Missing or invalid "currentDraft" field.' });
+    return;
+  }
+
+  try {
+    const accountKey = getAccountKeyFromRequest(req);
+    const result = await redraftReply({
+      accountKey,
+      emailId: resolvedId,
+      originalMessage: typeof resolvedMessage === 'string' ? resolvedMessage : '',
+      currentDraft: typeof currentDraft === 'string' ? currentDraft : '',
+      tone: normalizedTone,
+    });
+
+    res.json({
+      success: true,
+      draft: result.draft,
+      tone: result.tone,
+      mode: result.mode,
+      warning: result.warning,
+      memoryContext: result.memoryContext,
+    });
+  } catch (error) {
+    console.error('[Relay] redraft failed:', error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Failed to redraft reply.',
+    });
+  }
+});
+
+async function notificationsForIds(accountKey, ids) {
   const idSet = new Set(ids);
-  return readNotifications(accountKey).filter((item) => idSet.has(item.id));
+  const notifications = await readNotifications(accountKey);
+  return notifications.filter((item) => idSet.has(item.id));
 }
 
 app.post('/send-reply', async (req, res) => {
@@ -376,11 +530,11 @@ app.post('/api/emails/archive', async (req, res) => {
       gmailResult = await archiveMessages(
         accountKey,
         ids,
-        notificationsForIds(accountKey, ids),
+        await notificationsForIds(accountKey, ids),
       );
     }
 
-    const feedResult = removeNotificationIds(accountKey, ids);
+    const feedResult = await removeNotificationIds(accountKey, ids);
 
     console.log(
       `[${accountKey}] Archived ${gmailResult.archived} message(s); pruned ${feedResult.removedCount} from feed.`,
@@ -421,11 +575,11 @@ app.post('/api/emails/trash', async (req, res) => {
       gmailResult = await trashMessages(
         accountKey,
         ids,
-        notificationsForIds(accountKey, ids),
+        await notificationsForIds(accountKey, ids),
       );
     }
 
-    const feedResult = removeNotificationIds(accountKey, ids);
+    const feedResult = await removeNotificationIds(accountKey, ids);
 
     console.log(
       `[${accountKey}] Trashed ${gmailResult.trashed} message(s); pruned ${feedResult.removedCount} from feed.`,
@@ -459,19 +613,35 @@ function getLanAddress() {
   return 'localhost';
 }
 
-const server = app.listen(PORT, HOST, () => {
-  const lanIp = getLanAddress();
-  console.log(`Shadow Inbox email relay listening on http://${HOST}:${PORT}`);
-  console.log(`Local:  http://localhost:${PORT}`);
-  console.log(`Phone:  http://${lanIp}:${PORT}  (set EXPO_PUBLIC_EMAIL_RELAY_URL to this)`);
-  console.log(`Accounts: ${listAccounts().map((a) => a.key).join(', ')}`);
-});
+function startServer(options = {}) {
+  const port = Number(options.port || process.env.PORT || process.env.EMAIL_RELAY_PORT || 3000);
+  const host = options.host || process.env.EMAIL_RELAY_HOST || '0.0.0.0';
 
-server.on('error', (error) => {
-  if (error.code === 'EADDRINUSE') {
-    console.error(`Port ${PORT} is already in use. Stop the other relay process and retry.`);
-  } else {
-    console.error('Email relay failed to start:', error);
-  }
-  process.exit(1);
-});
+  const server = app.listen(port, host, () => {
+    const lanIp = getLanAddress();
+    const { isSupabaseEnabled } = require('../backend/supabaseClient');
+    const storageMode = isSupabaseEnabled() ? 'Supabase' : 'local JSON files';
+    console.log(`Shadow Inbox email relay listening on http://${host}:${port}`);
+    console.log(`Storage: ${storageMode}`);
+    console.log(`Local:  http://localhost:${port}`);
+    console.log(`Phone:  http://${lanIp}:${port}  (set EXPO_PUBLIC_EMAIL_RELAY_URL to this)`);
+    console.log(`Accounts: ${listAccounts().map((a) => a.key).join(', ')}`);
+  });
+
+  server.on('error', (error) => {
+    if (error.code === 'EADDRINUSE') {
+      console.error(`Port ${port} is already in use. Stop the other relay process and retry.`);
+    } else {
+      console.error('Email relay failed to start:', error);
+    }
+    process.exit(1);
+  });
+
+  return server;
+}
+
+module.exports = { app, startServer };
+
+if (require.main === module) {
+  startServer();
+}

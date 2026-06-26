@@ -5,6 +5,8 @@ const path = require('path');
 
 require('dotenv').config();
 
+const { GOOGLE_OAUTH_SCOPES } = require('../backend/googleOAuthScopes');
+
 const PACKAGE_NAME = 'com.saintjeromeiii.shadowinbox';
 const PROJECT_KEYSTORE = path.join(__dirname, '../android/app/debug.keystore');
 const DEFAULT_KEYSTORE = path.join(
@@ -50,4 +52,10 @@ console.log(`  4. SHA-1: ${projectSha1 || '<run keytool on android/app/debug.key
 console.log('  5. Confirm Web client ID in .env matches a "Web application" client');
 console.log('  6. Both clients must be in the SAME Google Cloud project');
 console.log('  7. OAuth consent screen → add every Gmail you sign in with as Test users');
-console.log('  8. Wait 5–10 minutes after saving, then reinstall the debug APK\n');
+console.log('  8. Enable Google Calendar API (APIs & Services → Library)');
+console.log('  9. Requested OAuth scopes at sign-in:');
+for (const scope of GOOGLE_OAUTH_SCOPES) {
+  console.log(`       - ${scope}`);
+}
+console.log(' 10. After adding Calendar scope, remove & re-link the account in the app');
+console.log(' 11. Wait 5–10 minutes after saving, then reinstall the debug APK\n');

@@ -16,6 +16,7 @@ const { readNotifications, writeNotifications } = require('../backend/notificati
 const { openInbox } = require('../backend/imapAuth');
 const { getImapConfigForAccount } = require('../backend/imapAuth');
 const { enrichNotifications } = require('../backend/notificationEnrichment');
+const { extractMailparserAttachments } = require('../backend/emailAttachments');
 
 const MAX_UNREAD = 15;
 
@@ -123,15 +124,19 @@ async function parseMessage(buffer, uid, meta = {}) {
   const sender = formatSender(parsed.from);
   const body = extractBody(parsed);
   const timestamp = (parsed.date || new Date()).toISOString();
+  const mailparserAttachments = extractMailparserAttachments(parsed);
 
   return {
-    id: `email-${uid}`,
-    sourceApp: 'Email',
-    sender,
-    rawText: buildRawText(subject, body),
-    timestamp,
-    messageIdHeader: parsed.messageId || null,
-    gmailMessageId: meta.gmailMsgId || null,
+    notification: {
+      id: `email-${uid}`,
+      sourceApp: 'Email',
+      sender,
+      rawText: buildRawText(subject, body),
+      timestamp,
+      messageIdHeader: parsed.messageId || null,
+      gmailMessageId: meta.gmailMsgId || null,
+    },
+    mailparserAttachments,
   };
 }
 
@@ -148,7 +153,7 @@ async function fetchNotifications(options = {}) {
   }
 
   if (account.mockOnly) {
-    const existing = readNotifications(accountKey);
+    const existing = await readNotifications(accountKey);
     if (!silent) {
       console.log(
         `[${accountKey}] Mock account — keeping ${existing.length} seeded notification(s).`,
@@ -166,7 +171,7 @@ async function fetchNotifications(options = {}) {
 
   if (account.oauth) {
     const imapConfig = await getImapConfigForAccount(accountKey);
-    const previousIds = new Set(readNotifications(accountKey).map((item) => item.id));
+    const previousIds = new Set((await readNotifications(accountKey)).map((item) => item.id));
 
     if (!silent) {
       console.log(`[${accountKey}] Connecting via Google OAuth as ${imapConfig.user}...`);
@@ -186,10 +191,16 @@ async function fetchNotifications(options = {}) {
     imap.end();
 
     const notifications = [];
+    const pendingAttachments = new Map();
     for (const message of rawMessages) {
-      const notification = await parseMessage(message.buffer, message.uid, {
-        gmailMsgId: message.gmailMsgId,
-      });
+      const { notification, mailparserAttachments } = await parseMessage(
+        message.buffer,
+        message.uid,
+        { gmailMsgId: message.gmailMsgId },
+      );
+      if (mailparserAttachments.length > 0) {
+        pendingAttachments.set(notification.id, mailparserAttachments);
+      }
       notifications.push(notification);
     }
 
@@ -197,10 +208,12 @@ async function fetchNotifications(options = {}) {
       (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
     );
 
-    const existing = readNotifications(accountKey);
-    const enriched = await enrichNotifications(accountKey, notifications, existing);
+    const existing = await readNotifications(accountKey);
+    const enriched = await enrichNotifications(accountKey, notifications, existing, {
+      pendingAttachments,
+    });
     const newCount = enriched.filter((item) => !previousIds.has(item.id)).length;
-    writeNotifications(accountKey, enriched);
+    await writeNotifications(accountKey, enriched);
 
     if (!silent) {
       console.log(
@@ -224,7 +237,7 @@ async function fetchNotifications(options = {}) {
     throw new Error(`IMAP credentials missing for account "${accountKey}".`);
   }
 
-  const previousIds = new Set(readNotifications(accountKey).map((item) => item.id));
+  const previousIds = new Set((await readNotifications(accountKey)).map((item) => item.id));
 
   if (!silent) {
     console.log(`[${accountKey}] Connecting to ${host}:${port} as ${user}...`);
@@ -244,10 +257,16 @@ async function fetchNotifications(options = {}) {
   imap.end();
 
   const notifications = [];
+  const pendingAttachments = new Map();
   for (const message of rawMessages) {
-    const notification = await parseMessage(message.buffer, message.uid, {
-      gmailMsgId: message.gmailMsgId,
-    });
+    const { notification, mailparserAttachments } = await parseMessage(
+      message.buffer,
+      message.uid,
+      { gmailMsgId: message.gmailMsgId },
+    );
+    if (mailparserAttachments.length > 0) {
+      pendingAttachments.set(notification.id, mailparserAttachments);
+    }
     notifications.push(notification);
   }
 
@@ -255,10 +274,12 @@ async function fetchNotifications(options = {}) {
     (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
   );
 
-  const existing = readNotifications(accountKey);
-  const enriched = await enrichNotifications(accountKey, notifications, existing);
+  const existing = await readNotifications(accountKey);
+  const enriched = await enrichNotifications(accountKey, notifications, existing, {
+    pendingAttachments,
+  });
   const newCount = enriched.filter((item) => !previousIds.has(item.id)).length;
-  writeNotifications(accountKey, enriched);
+  await writeNotifications(accountKey, enriched);
 
   if (!silent) {
     console.log(

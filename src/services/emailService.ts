@@ -1,8 +1,10 @@
 import type { TriagedNotification } from '../types/notification';
 import type { AccountKey } from '../types/account';
+import type { ReplyTone } from '../types/replyTone';
 
 const RELAY_URL =
-  process.env.EXPO_PUBLIC_EMAIL_RELAY_URL ?? 'http://localhost:3000';
+  process.env.EXPO_PUBLIC_EMAIL_RELAY_URL ??
+  'https://shadow-inbox-production.up.railway.app';
 const REQUEST_TIMEOUT_MS = 15_000;
 
 let activeAccountKey: AccountKey = 'personal';
@@ -88,6 +90,36 @@ export function getRelayUrl(): string {
   return RELAY_URL.replace(/\/$/, '');
 }
 
+export function formatRelayConnectionError(error?: unknown): string {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  const isNetworkFailure =
+    /network request failed|failed to fetch|network error|timed out|abort/i.test(
+      message,
+    );
+
+  if (isNetworkFailure) {
+    return [
+      `Cannot reach the backend at ${getRelayUrl()}.`,
+      'Confirm EXPO_PUBLIC_EMAIL_RELAY_URL is set to your live relay URL,',
+      'then restart Expo: npx expo start -c',
+    ].join(' ');
+  }
+
+  return message || 'Could not reach the email relay.';
+}
+
+export async function relayFetch(
+  path: string,
+  options: RequestInit = {},
+  timeoutMs = REQUEST_TIMEOUT_MS,
+): Promise<Response> {
+  try {
+    return await fetchWithTimeout(`${getRelayUrl()}${path}`, options, timeoutMs);
+  } catch (error) {
+    throw new Error(formatRelayConnectionError(error));
+  }
+}
+
 export async function checkRelayHealth(): Promise<boolean> {
   try {
     const response = await fetchWithTimeout(
@@ -110,37 +142,15 @@ export async function sendReply(
     return { success: false, error: 'Reply text cannot be empty.' };
   }
 
-  if (notification.sourceApp !== 'Email') {
-    return {
-      success: false,
-      error: 'SMTP send is only supported for email notifications.',
-    };
-  }
-
-  const recipient = parseRecipientEmail(notification.sender);
-  if (!recipient) {
-    return {
-      success: false,
-      error: 'Could not parse a recipient email from this notification.',
-    };
-  }
-
-  const payload: SendReplyPayload = {
-    recipient,
-    subject: buildReplySubject(notification.rawText),
-    replyText: trimmedReply,
-  };
-
   try {
-    const response = await fetchWithTimeout(
-      `${getRelayUrl()}/send-reply`,
-      {
-        method: 'POST',
-        headers: relayHeaders(),
-        body: JSON.stringify(payload),
-      },
-      REQUEST_TIMEOUT_MS,
-    );
+    const response = await relayFetch('/api/broadcast/reply', {
+      method: 'POST',
+      headers: relayHeaders(),
+      body: JSON.stringify({
+        notificationId: notification.id,
+        replyText: trimmedReply,
+      }),
+    });
 
     if (!response.ok) {
       let errorMessage = `Relay returned ${response.status}`;
@@ -158,26 +168,12 @@ export async function sendReply(
 
     return { success: true };
   } catch (error) {
-    const isNetworkError =
-      error instanceof TypeError ||
-      (error instanceof Error &&
-        /network request failed|failed to fetch|network error/i.test(error.message));
-
-    let message =
+    const message =
       error instanceof Error
         ? error.message
         : 'Could not reach the email relay.';
 
-    if (isNetworkError) {
-      message = [
-        `Cannot reach email relay at ${getRelayUrl()}.`,
-        'On your phone: confirm EXPO_PUBLIC_EMAIL_RELAY_URL uses your Mac\'s LAN IP (not localhost),',
-        'npm run dev:backend is running, and phone + Mac are on the same Wi‑Fi.',
-        'Then restart Expo with: npx expo start -c',
-      ].join(' ');
-    }
-
-    console.warn('[Shadow Inbox] Email send failed:', error);
+    console.warn('[Shadow Inbox] Broadcast send failed:', error);
     return { success: false, error: message };
   }
 }
@@ -300,6 +296,81 @@ export async function syncShadowLabels(
         error instanceof Error
           ? error.message
           : 'Could not sync Gmail labels with the relay.',
+    };
+  }
+}
+
+export interface RedraftReplyPayload {
+  emailId: string;
+  originalMessage: string;
+  currentDraft: string;
+  tone: ReplyTone;
+}
+
+export interface RedraftReplyResult {
+  success: boolean;
+  draft?: string;
+  tone?: ReplyTone;
+  mode?: 'template' | 'live' | 'fallback';
+  error?: string;
+}
+
+const REDRAFT_TIMEOUT_MS = 30_000;
+
+export async function redraftEmailReply(
+  payload: RedraftReplyPayload,
+): Promise<RedraftReplyResult> {
+  try {
+    const response = await fetchWithTimeout(
+      `${getRelayUrl()}/api/emails/redraft`,
+      {
+        method: 'POST',
+        headers: relayHeaders(),
+        body: JSON.stringify({
+          emailId: payload.emailId,
+          originalMessage: payload.originalMessage,
+          currentDraft: payload.currentDraft,
+          tone: payload.tone,
+        }),
+      },
+      REDRAFT_TIMEOUT_MS,
+    );
+
+    if (!response.ok) {
+      let errorMessage = `Relay returned ${response.status}`;
+      try {
+        const errorBody = (await response.json()) as { error?: string };
+        if (errorBody.error) errorMessage = errorBody.error;
+      } catch {
+        const text = await response.text();
+        if (text) errorMessage = text;
+      }
+      return { success: false, error: errorMessage };
+    }
+
+    const data = (await response.json()) as {
+      draft?: string;
+      tone?: ReplyTone;
+      mode?: RedraftReplyResult['mode'];
+    };
+
+    if (!data.draft?.trim()) {
+      return { success: false, error: 'Redraft returned an empty reply.' };
+    }
+
+    return {
+      success: true,
+      draft: data.draft,
+      tone: data.tone,
+      mode: data.mode,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : 'Could not redraft reply with the relay.',
     };
   }
 }

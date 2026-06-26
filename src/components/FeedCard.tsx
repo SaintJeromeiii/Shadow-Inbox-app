@@ -9,15 +9,23 @@ import {
   ActivityIndicator,
   Keyboard,
   Animated,
+  ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
+import * as Haptics from 'expo-haptics';
 import type { TriagedNotification } from '../types/notification';
-import { SOURCE_COLORS, SOURCE_LABELS } from '../constants/sourceStyles';
+import { useVoiceRecording } from '../hooks/useVoiceRecording';
+import { SOURCE_COLORS, SOURCE_LABELS, SOURCE_PILL_EMOJI } from '../constants/sourceStyles';
 import {
   formatShadowLabelName,
   SHADOW_LABEL_STYLES,
 } from '../constants/shadowLabels';
+import {
+  DEFAULT_REPLY_TONE,
+  REPLY_TONE_OPTIONS,
+  type ReplyTone,
+} from '../types/replyTone';
 
 interface FeedCardProps {
   notification: TriagedNotification;
@@ -29,6 +37,16 @@ interface FeedCardProps {
     notification: TriagedNotification,
     replyText: string,
   ) => Promise<void>;
+  onRedraft: (
+    notification: TriagedNotification,
+    tone: ReplyTone,
+    currentDraft: string,
+  ) => Promise<string>;
+  onVoiceCommand: (
+    notification: TriagedNotification,
+    audioUri: string,
+    currentDraft: string,
+  ) => Promise<string>;
   isRemoving?: boolean;
   actionBusy?: boolean;
 }
@@ -38,10 +56,38 @@ function formatTimestamp(iso: string): string {
   return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
+function formatCalendarPreviewTime(iso: string): string {
+  const date = new Date(iso);
+  return date.toLocaleString([], {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
 function urgencyColor(score: number): string {
   if (score >= 8) return '#FF6B6B';
   if (score >= 5) return '#FFB347';
   return '#6BCB77';
+}
+
+function sourceIconName(
+  source: TriagedNotification['sourceApp'],
+): keyof typeof Ionicons.glyphMap {
+  switch (source) {
+    case 'Slack':
+      return 'chatbubbles-outline';
+    case 'Discord':
+      return 'game-controller-outline';
+    case 'SMS':
+      return 'chatbox-outline';
+    case 'WhatsApp':
+      return 'logo-whatsapp';
+    default:
+      return 'mail-outline';
+  }
 }
 
 function ActionButton({
@@ -98,13 +144,24 @@ export default function FeedCard({
   onGmailArchive,
   onTrash,
   onSendReply,
+  onRedraft,
+  onVoiceCommand,
   isRemoving = false,
   actionBusy = false,
 }: FeedCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [sending, setSending] = useState(false);
+  const [redrafting, setRedrafting] = useState(false);
+  const [voiceProcessing, setVoiceProcessing] = useState(false);
+  const [selectedTone, setSelectedTone] = useState<ReplyTone>(DEFAULT_REPLY_TONE);
   const [isEditing, setIsEditing] = useState(false);
   const [localAction, setLocalAction] = useState<'archive' | 'trash' | null>(null);
+  const {
+    isRecording,
+    pulseAnim,
+    startRecording,
+    stopRecording,
+  } = useVoiceRecording();
   const replyInputRef = useRef<TextInput>(null);
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const triage = notification.triage;
@@ -125,9 +182,26 @@ export default function FeedCard({
           ]
         : [];
   const sourceColor = SOURCE_COLORS[notification.sourceApp];
+  const sendActionLabel =
+    notification.sourceApp === 'Slack'
+      ? 'Send to Slack'
+      : notification.sourceApp === 'Discord'
+        ? 'Send to Discord'
+        : 'Approve & Send';
   const isActionRequired = triage?.category === 'action_required';
   const isEmail = notification.sourceApp === 'Email';
-  const busy = sending || actionBusy || localAction !== null;
+  const attachmentLabels = notification.attachmentScan?.labels ?? [];
+  const remembersPastThread = notification.memoryContext?.injected === true;
+  const calendarGuard = notification.calendarGuard;
+  const showCalendarGuard =
+    calendarGuard?.checked === true && Boolean(calendarGuard.proposedWindow);
+  const busy =
+    sending ||
+    redrafting ||
+    voiceProcessing ||
+    isRecording ||
+    actionBusy ||
+    localAction !== null;
 
   useEffect(() => {
     if (!isRemoving) {
@@ -146,6 +220,79 @@ export default function FeedCard({
     if (!draftText.trim()) return;
     await Clipboard.setStringAsync(draftText.trim());
     Alert.alert('Copied', 'Your edited reply was copied to clipboard.');
+  };
+
+  const handleToneSelect = async (tone: ReplyTone) => {
+    if (tone === selectedTone || redrafting || sending) return;
+
+    const previousTone = selectedTone;
+    stopCardPress();
+    setSelectedTone(tone);
+    setRedrafting(true);
+
+    try {
+      const nextDraft = await onRedraft(notification, tone, draftText);
+      onDraftChange(notification.id, nextDraft);
+    } catch (error) {
+      setSelectedTone(previousTone);
+      Alert.alert(
+        'Redraft Failed',
+        error instanceof Error
+          ? error.message
+          : 'Could not rewrite the draft. Is the email relay running?',
+      );
+    } finally {
+      setRedrafting(false);
+    }
+  };
+
+  const handleMicPress = async () => {
+    if (voiceProcessing || redrafting || sending) return;
+
+    stopCardPress();
+
+    if (!isRecording) {
+      if (!draftText.trim()) {
+        Alert.alert('Voice Command', 'Add or generate a draft before recording a voice command.');
+        return;
+      }
+
+      try {
+        await startRecording();
+        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      } catch (error) {
+        Alert.alert(
+          'Microphone',
+          error instanceof Error
+            ? error.message
+            : 'Could not start recording.',
+        );
+      }
+      return;
+    }
+
+    setVoiceProcessing(true);
+
+    try {
+      const audioUri = await stopRecording();
+      if (!audioUri) {
+        throw new Error('No audio was captured. Try recording again.');
+      }
+
+      const nextDraft = await onVoiceCommand(notification, audioUri, draftText);
+      onDraftChange(notification.id, nextDraft);
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (error) {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert(
+        'Voice Command Failed',
+        error instanceof Error
+          ? error.message
+          : 'Could not process your voice command.',
+      );
+    } finally {
+      setVoiceProcessing(false);
+    }
   };
 
   const handleSend = async () => {
@@ -201,12 +348,31 @@ export default function FeedCard({
     >
       <View style={styles.cardTopRow}>
         <View style={styles.cardTopLeft}>
-          <View style={[styles.sourceTag, { backgroundColor: sourceColor }]}>
-            <Ionicons name="mail-outline" size={12} color="#FFFFFF" />
+          <View
+            style={[
+              styles.sourceTag,
+              { backgroundColor: sourceColor },
+              notification.sourceApp === 'Slack' && styles.sourceTagSlack,
+              notification.sourceApp === 'Discord' && styles.sourceTagDiscord,
+            ]}
+          >
+            <Text style={styles.sourceTagEmoji}>
+              {SOURCE_PILL_EMOJI[notification.sourceApp]}
+            </Text>
+            <Ionicons
+              name={sourceIconName(notification.sourceApp)}
+              size={12}
+              color="#FFFFFF"
+            />
             <Text style={styles.sourceTagText}>
               {SOURCE_LABELS[notification.sourceApp]}
             </Text>
           </View>
+          {notification.channelName ? (
+            <Text style={styles.channelContext} numberOfLines={1}>
+              {notification.channelName}
+            </Text>
+          ) : null}
           {shadowLabels.length > 0 && (
             <View style={styles.labelRow}>
               {shadowLabels.map((label) => {
@@ -229,6 +395,22 @@ export default function FeedCard({
                   </View>
                 );
               })}
+            </View>
+          )}
+          {attachmentLabels.length > 0 && (
+            <View style={styles.attachmentRow}>
+              {attachmentLabels.map((label) => (
+                <View key={`${notification.id}-${label}`} style={styles.attachmentPill}>
+                  <Text style={styles.attachmentPillText}>
+                    {label === 'Image Attached' ? '📎 Image Attached' : '📄 PDF Scanned'}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+          {remembersPastThread && (
+            <View style={styles.memoryPill}>
+              <Text style={styles.memoryPillText}>🧠 Remembers past thread</Text>
             </View>
           )}
         </View>
@@ -328,6 +510,65 @@ export default function FeedCard({
               onPress={stopCardPress}
               onPressIn={stopCardPress}
             >
+              {showCalendarGuard && (
+                <View style={styles.calendarGuardSection}>
+                  <View
+                    style={[
+                      styles.calendarGuardBadge,
+                      calendarGuard?.status === 'clear' && styles.calendarGuardBadgeClear,
+                      calendarGuard?.status === 'conflict' && styles.calendarGuardBadgeConflict,
+                      calendarGuard?.status === 'unavailable' &&
+                        styles.calendarGuardBadgeUnavailable,
+                    ]}
+                  >
+                    <Text style={styles.calendarGuardBadgeText}>
+                      {calendarGuard?.status === 'clear'
+                        ? `🟢 ${calendarGuard.badgeMessage || `Calendar Clear: ${calendarGuard.proposedWindow?.label} is open`}`
+                        : calendarGuard?.status === 'conflict'
+                          ? `⚠️ ${calendarGuard.badgeMessage || `Schedule Conflict: Overlaps with ${calendarGuard.conflictEvent?.title || 'another event'}`}`
+                          : `📅 ${calendarGuard?.badgeMessage || `Scheduling: ${calendarGuard?.proposedWindow?.label}`}`}
+                    </Text>
+                  </View>
+
+                  {(calendarGuard?.surroundingEvents?.length ?? 0) > 0 && (
+                    <View style={styles.calendarPreviewStrip}>
+                      <Text style={styles.calendarPreviewTitle}>Nearby on your calendar</Text>
+                      {calendarGuard?.surroundingEvents?.map((event) => (
+                        <View
+                          key={`${notification.id}-${event.title}-${event.start}`}
+                          style={styles.calendarPreviewRow}
+                        >
+                          <View style={styles.calendarPreviewDot} />
+                          <View style={styles.calendarPreviewCopy}>
+                            <Text style={styles.calendarPreviewEvent} numberOfLines={1}>
+                              {event.title}
+                            </Text>
+                            <Text style={styles.calendarPreviewTime}>
+                              {formatCalendarPreviewTime(event.start)}
+                            </Text>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  {calendarGuard?.status === 'conflict' &&
+                    (calendarGuard.alternativeSlots?.length ?? 0) > 0 && (
+                      <View style={styles.calendarAltSlots}>
+                        <Text style={styles.calendarAltSlotsTitle}>Open alternatives</Text>
+                        {calendarGuard.alternativeSlots?.slice(0, 2).map((slot) => (
+                          <Text
+                            key={`${notification.id}-${slot.start}`}
+                            style={styles.calendarAltSlotText}
+                          >
+                            • {slot.label}
+                          </Text>
+                        ))}
+                      </View>
+                    )}
+                </View>
+              )}
+
               <View style={styles.replyHeader}>
                 <Ionicons name="create-outline" size={14} color="#5B8DEF" />
                 <Text style={styles.replyLabel}>Your reply</Text>
@@ -335,27 +576,107 @@ export default function FeedCard({
               <Text style={styles.replyHint}>
                 Edit freely — your final text is what gets sent.
               </Text>
-              <TextInput
-                ref={replyInputRef}
-                style={styles.replyInput}
-                value={draftText}
-                onChangeText={(text) => onDraftChange(notification.id, text)}
-                onFocus={() => {
-                  setIsEditing(true);
-                  setExpanded(true);
-                }}
-                onBlur={() => setIsEditing(false)}
-                multiline
-                scrollEnabled
-                textAlignVertical="top"
-                placeholder="Draft or edit your reply here…"
-                placeholderTextColor="#5C6478"
-                editable={!sending}
-                autoCorrect
-                autoCapitalize="sentences"
-                selectionColor="#5B8DEF"
-                onPressIn={stopCardPress}
-              />
+              <View style={styles.replyInputWrap}>
+                <TextInput
+                  ref={replyInputRef}
+                  style={styles.replyInput}
+                  value={draftText}
+                  onChangeText={(text) => onDraftChange(notification.id, text)}
+                  onFocus={() => {
+                    setIsEditing(true);
+                    setExpanded(true);
+                  }}
+                  onBlur={() => setIsEditing(false)}
+                  multiline
+                  scrollEnabled
+                  textAlignVertical="top"
+                  placeholder="Draft or edit your reply here…"
+                  placeholderTextColor="#5C6478"
+                  editable={!sending && !redrafting && !voiceProcessing && !isRecording}
+                  autoCorrect
+                  autoCapitalize="sentences"
+                  selectionColor="#5B8DEF"
+                  onPressIn={stopCardPress}
+                />
+                {(redrafting || voiceProcessing || isRecording) && (
+                  <View style={styles.redraftOverlay}>
+                    <ActivityIndicator color="#5B8DEF" size="small" />
+                    <Text style={styles.redraftOverlayText}>
+                      {isRecording
+                        ? 'Listening…'
+                        : voiceProcessing
+                          ? 'Processing voice…'
+                          : 'Rewriting…'}
+                    </Text>
+                  </View>
+                )}
+              </View>
+              <View style={styles.toneRow}>
+                <View style={styles.toneHeaderRow}>
+                  <Text style={styles.toneLabel}>Tone</Text>
+                  <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.micButton,
+                        isRecording && styles.micButtonActive,
+                        (busy && !isRecording) && styles.micButtonDisabled,
+                        pressed && !busy && styles.micButtonPressed,
+                      ]}
+                      onPress={(e) => {
+                        stopCardPress(e);
+                        void handleMicPress();
+                      }}
+                      disabled={busy && !isRecording}
+                      accessibilityLabel={
+                        isRecording ? 'Stop voice recording' : 'Record voice command'
+                      }
+                    >
+                      <Ionicons
+                        name={isRecording ? 'stop' : 'mic'}
+                        size={16}
+                        color={isRecording ? '#0D0F14' : '#C7D8FF'}
+                      />
+                    </Pressable>
+                  </Animated.View>
+                </View>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.toneChipRow}
+                  keyboardShouldPersistTaps="handled"
+                >
+                  {REPLY_TONE_OPTIONS.map((option) => {
+                    const isActive = selectedTone === option.key;
+                    return (
+                      <Pressable
+                        key={option.key}
+                        style={({ pressed }) => [
+                          styles.toneChip,
+                          isActive && styles.toneChipActive,
+                          pressed && !busy && styles.toneChipPressed,
+                          busy && styles.toneChipDisabled,
+                        ]}
+                        onPress={(e) => {
+                          stopCardPress(e);
+                          void handleToneSelect(option.key);
+                        }}
+                        disabled={busy}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: isActive }}
+                      >
+                        <Text
+                          style={[
+                            styles.toneChipText,
+                            isActive && styles.toneChipTextActive,
+                          ]}
+                        >
+                          {option.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </View>
               <View style={styles.actionRow}>
                 <ActionButton
                   label="Copy"
@@ -364,27 +685,43 @@ export default function FeedCard({
                     stopCardPress(e);
                     void handleCopy();
                   }}
-                  disabled={sending}
+                  disabled={sending || redrafting || voiceProcessing || isRecording}
                 />
                 <Pressable
                   style={({ pressed }) => [
                     styles.actionButton,
                     styles.sendButton,
-                    (sending || !draftText.trim()) && styles.actionButtonDisabled,
-                    pressed && !sending && styles.buttonPressed,
+                    (sending ||
+                      redrafting ||
+                      voiceProcessing ||
+                      isRecording ||
+                      !draftText.trim()) &&
+                      styles.actionButtonDisabled,
+                    pressed &&
+                      !sending &&
+                      !redrafting &&
+                      !voiceProcessing &&
+                      !isRecording &&
+                      styles.buttonPressed,
                   ]}
                   onPress={(e) => {
                     stopCardPress(e);
                     void handleSend();
                   }}
-                  disabled={sending || !draftText.trim()}
+                  disabled={
+                    sending ||
+                    redrafting ||
+                    voiceProcessing ||
+                    isRecording ||
+                    !draftText.trim()
+                  }
                 >
                   {sending ? (
                     <ActivityIndicator color="#FFFFFF" size="small" />
                   ) : (
                     <>
                       <Ionicons name="send" size={17} color="#FFFFFF" />
-                      <Text style={styles.sendButtonText}>Send</Text>
+                      <Text style={styles.sendButtonText}>{sendActionLabel}</Text>
                     </>
                   )}
                 </Pressable>
@@ -436,6 +773,38 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 6,
   },
+  attachmentRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  attachmentPill: {
+    borderWidth: 1,
+    borderColor: 'rgba(91, 141, 239, 0.28)',
+    backgroundColor: 'rgba(91, 141, 239, 0.08)',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  attachmentPillText: {
+    color: '#9DB9F0',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  memoryPill: {
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: 'rgba(167, 139, 250, 0.28)',
+    backgroundColor: 'rgba(167, 139, 250, 0.1)',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  memoryPillText: {
+    color: '#C4B5FD',
+    fontSize: 11,
+    fontWeight: '600',
+  },
   shadowLabelPill: {
     borderWidth: 1,
     borderRadius: 999,
@@ -453,7 +822,24 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 10,
     paddingVertical: 5,
-    borderRadius: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  sourceTagSlack: {
+    shadowColor: '#E01E5A',
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  sourceTagDiscord: {
+    shadowColor: '#5865F2',
+    shadowOpacity: 0.28,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  sourceTagEmoji: {
+    fontSize: 12,
   },
   sourceTagText: {
     color: '#FFFFFF',
@@ -461,6 +847,13 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.6,
     textTransform: 'uppercase',
+  },
+  channelContext: {
+    color: '#8B93A8',
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 4,
+    maxWidth: 220,
   },
   urgencyWrap: {
     flexDirection: 'row',
@@ -567,6 +960,90 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#2A3550',
   },
+  calendarGuardSection: {
+    marginBottom: 14,
+    gap: 10,
+  },
+  calendarGuardBadge: {
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+  },
+  calendarGuardBadgeClear: {
+    backgroundColor: 'rgba(107, 203, 119, 0.12)',
+    borderColor: 'rgba(107, 203, 119, 0.45)',
+  },
+  calendarGuardBadgeConflict: {
+    backgroundColor: 'rgba(255, 179, 71, 0.12)',
+    borderColor: 'rgba(255, 179, 71, 0.5)',
+  },
+  calendarGuardBadgeUnavailable: {
+    backgroundColor: 'rgba(91, 141, 239, 0.1)',
+    borderColor: 'rgba(91, 141, 239, 0.35)',
+  },
+  calendarGuardBadgeText: {
+    color: '#E8ECF5',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
+  calendarPreviewStrip: {
+    backgroundColor: '#171C28',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2A3142',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  calendarPreviewTitle: {
+    color: '#8B93A8',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
+  calendarPreviewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  calendarPreviewDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#5B8DEF',
+  },
+  calendarPreviewCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  calendarPreviewEvent: {
+    color: '#D0D5E0',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  calendarPreviewTime: {
+    color: '#6E768A',
+    fontSize: 11,
+  },
+  calendarAltSlots: {
+    paddingHorizontal: 2,
+    gap: 4,
+  },
+  calendarAltSlotsTitle: {
+    color: '#8B93A8',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
+  },
+  calendarAltSlotText: {
+    color: '#A8B0C2',
+    fontSize: 11,
+    lineHeight: 16,
+  },
   replyHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -584,6 +1061,9 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginBottom: 12,
   },
+  replyInputWrap: {
+    position: 'relative',
+  },
   replyInput: {
     color: '#E8ECF4',
     fontSize: 15,
@@ -596,6 +1076,92 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#3D4F6F',
     borderRadius: 10,
+  },
+  redraftOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(13, 15, 20, 0.82)',
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  redraftOverlayText: {
+    color: '#9AA3B8',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  toneRow: {
+    marginTop: 12,
+    gap: 8,
+  },
+  toneHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  toneLabel: {
+    color: '#5C6478',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+  toneChipRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingRight: 4,
+  },
+  toneChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#2E3548',
+    backgroundColor: '#141824',
+  },
+  toneChipActive: {
+    borderColor: 'rgba(91, 141, 239, 0.55)',
+    backgroundColor: 'rgba(91, 141, 239, 0.12)',
+  },
+  toneChipPressed: {
+    opacity: 0.8,
+  },
+  toneChipDisabled: {
+    opacity: 0.5,
+  },
+  toneChipText: {
+    color: '#8B93A8',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  toneChipTextActive: {
+    color: '#8FB4FF',
+  },
+  micButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1A2030',
+    borderWidth: 1,
+    borderColor: 'rgba(91, 141, 239, 0.35)',
+    shadowColor: '#5B8DEF',
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  micButtonActive: {
+    backgroundColor: '#FF6B6B',
+    borderColor: '#FF8A8A',
+    shadowColor: '#FF6B6B',
+    shadowOpacity: 0.35,
+  },
+  micButtonDisabled: {
+    opacity: 0.45,
+  },
+  micButtonPressed: {
+    opacity: 0.85,
   },
   actionRow: {
     flexDirection: 'row',

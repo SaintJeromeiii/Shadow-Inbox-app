@@ -40,6 +40,12 @@ src/data/account_personal_notifications.json
 src/data/account_google_*_notifications.json
 backend/user_tokens.json
 backend/shadow_label_cache.json
+backend/device_push_tokens.json
+backend/push_alerted_ids.json
+backend/vector_memory.json
+backend/extracted_tasks.json
+backend/data/auto_pilot_history.json
+backend/data/finances.json
 
 # typescript
 *.tsbuildinfo

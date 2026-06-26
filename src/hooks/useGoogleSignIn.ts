@@ -7,6 +7,9 @@ import {
   statusCodes,
 } from '@react-native-google-signin/google-signin';
 import { exchangeGoogleAuthCode } from '../services/authService';
+import { checkRelayHealth } from '../services/emailService';
+import { unhideAccountOnDevice } from '../services/accountStorage';
+import { GOOGLE_OAUTH_SCOPES } from '../constants/googleOAuthScopes';
 import { normalizeGoogleClientId } from '../utils/googleOAuthRedirect';
 import type { AccountProfile } from '../types/account';
 
@@ -22,12 +25,7 @@ function isPlaceholderClientId(value: string): boolean {
   return PLACEHOLDER_CLIENT_IDS.has(normalized) || normalized.includes('your_');
 }
 
-const GMAIL_SCOPES = [
-  'https://mail.google.com/',
-  'openid',
-  'email',
-  'profile',
-];
+const GMAIL_SCOPES = [...GOOGLE_OAUTH_SCOPES];
 
 interface UseGoogleSignInOptions {
   onSuccess?: (account: AccountProfile) => void | Promise<void>;
@@ -76,6 +74,15 @@ export function useGoogleSignIn(options: UseGoogleSignInOptions = {}) {
 
     setIsSigningIn(true);
     try {
+      const relayReady = await checkRelayHealth();
+      if (!relayReady) {
+        Alert.alert(
+          'Email Relay Offline',
+          'Shadow Inbox could not reach the cloud backend. Confirm EXPO_PUBLIC_EMAIL_RELAY_URL is set correctly, then try again.',
+        );
+        return;
+      }
+
       await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
       const signInResult = await GoogleSignin.signIn();
 
@@ -161,6 +168,13 @@ export function useGoogleSignIn(options: UseGoogleSignInOptions = {}) {
 
   return {
     signInWithGoogle,
+    signOutFromGoogle: async () => {
+      try {
+        await GoogleSignin.signOut();
+      } catch {
+        // ignore — account may already be signed out natively
+      }
+    },
     isSigningIn,
     isGoogleConfigured:
       Boolean(webClientId) && !isPlaceholderClientId(webClientId),

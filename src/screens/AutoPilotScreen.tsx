@@ -1,0 +1,348 @@
+import { useCallback, useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  Modal,
+  Pressable,
+  StyleSheet,
+  ScrollView,
+  ActivityIndicator,
+  Switch,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import * as Haptics from 'expo-haptics';
+import { Ionicons } from '@expo/vector-icons';
+import {
+  fetchAutoPilotHistory,
+  fetchAutoPilotRules,
+  formatAutoPilotTimestamp,
+  formatRulePlatform,
+  toggleAutoPilotRule,
+} from '../services/autoPilotService';
+import type { AutoPilotHistoryEntry, AutoPilotRule } from '../types/autoPilot';
+
+interface AutoPilotScreenProps {
+  visible: boolean;
+  onClose: () => void;
+}
+
+export default function AutoPilotScreen({ visible, onClose }: AutoPilotScreenProps) {
+  const [rules, setRules] = useState<AutoPilotRule[]>([]);
+  const [history, setHistory] = useState<AutoPilotHistoryEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [togglingRuleId, setTogglingRuleId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [rulesResult, historyEntries] = await Promise.all([
+        fetchAutoPilotRules(),
+        fetchAutoPilotHistory(30),
+      ]);
+      setRules(rulesResult.rules);
+      setHistory(historyEntries);
+    } catch (loadError) {
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : 'Could not load auto-pilot settings from relay.',
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!visible) return;
+    void loadData();
+  }, [visible, loadData]);
+
+  const handleToggleRule = async (rule: AutoPilotRule, enabled: boolean) => {
+    setTogglingRuleId(rule.id);
+    try {
+      const updated = await toggleAutoPilotRule(rule.id, enabled);
+      setRules((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } catch (toggleError) {
+      setError(
+        toggleError instanceof Error ? toggleError.message : 'Could not update rule.',
+      );
+    } finally {
+      setTogglingRuleId(null);
+    }
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.title}>🤖 Auto-Pilot</Text>
+            <Text style={styles.subtitle}>Automated rules engine</Text>
+          </View>
+          <Pressable style={styles.closeButton} onPress={onClose}>
+            <Ionicons name="close" size={22} color="#D0D5E0" />
+          </Pressable>
+        </View>
+
+        {loading ? (
+          <View style={styles.loadingState}>
+            <ActivityIndicator color="#5B8DEF" size="large" />
+            <Text style={styles.loadingText}>Loading automation hub…</Text>
+          </View>
+        ) : (
+          <ScrollView
+            style={styles.scroll}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+            <Text style={styles.sectionTitle}>🤖 Auto-Pilot Active Rules</Text>
+            <Text style={styles.sectionHint}>
+              Matched messages are replied to, tasks closed, and removed from your inbox automatically.
+            </Text>
+
+            <View style={styles.rulesList}>
+              {rules.map((rule) => (
+                <View key={rule.id} style={styles.ruleCard}>
+                  <View style={styles.ruleTopRow}>
+                    <View style={styles.ruleCopy}>
+                      <Text style={styles.ruleName}>{rule.name}</Text>
+                      <Text style={styles.rulePlatform}>{formatRulePlatform(rule.platform)}</Text>
+                    </View>
+                    <Switch
+                      value={rule.enabled}
+                      onValueChange={(value) => void handleToggleRule(rule, value)}
+                      disabled={togglingRuleId === rule.id}
+                      trackColor={{ false: '#2A3142', true: '#5B8DEF' }}
+                      thumbColor={rule.enabled ? '#FFFFFF' : '#8B93A8'}
+                    />
+                  </View>
+                  <Text style={styles.ruleCondition}>If {rule.condition}</Text>
+                  {rule.action === 'reply' && rule.replyText ? (
+                    <Text style={styles.ruleReply} numberOfLines={2}>
+                      → "{rule.replyText}"
+                    </Text>
+                  ) : (
+                    <Text style={styles.ruleReply}>→ Archive without reply</Text>
+                  )}
+                  {rule.autoCloseTask ? (
+                    <Text style={styles.ruleMeta}>Auto-closes linked Kanban task</Text>
+                  ) : null}
+                </View>
+              ))}
+            </View>
+
+            <Text style={[styles.sectionTitle, styles.historyTitle]}>
+              Live Automation History
+            </Text>
+            <Text style={styles.sectionHint}>
+              Rolling ledger of what Auto-Pilot handled today.
+            </Text>
+
+            {history.length === 0 ? (
+              <View style={styles.emptyHistory}>
+                <Text style={styles.emptyHistoryText}>
+                  No automated actions yet. Matching pings will appear here.
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.historyList}>
+                {history.map((entry) => (
+                  <View key={entry.id} style={styles.historyCard}>
+                    <View style={styles.historyHeader}>
+                      <Text style={styles.historySummary}>{entry.summary}</Text>
+                      <Text style={styles.historyTime}>
+                        {formatAutoPilotTimestamp(entry.timestamp)}
+                      </Text>
+                    </View>
+                    <Text style={styles.historyMeta}>
+                      Rule: {entry.ruleName} · {entry.platform}
+                    </Text>
+                    {entry.replyText ? (
+                      <Text style={styles.historyReply} numberOfLines={2}>
+                        Sent: "{entry.replyText}"
+                      </Text>
+                    ) : null}
+                  </View>
+                ))}
+              </View>
+            )}
+          </ScrollView>
+        )}
+      </SafeAreaView>
+    </Modal>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#0D0F14',
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1E2433',
+  },
+  title: {
+    color: '#FFFFFF',
+    fontSize: 24,
+    fontWeight: '800',
+  },
+  subtitle: {
+    color: '#6B7288',
+    fontSize: 13,
+    marginTop: 2,
+  },
+  closeButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#161922',
+    borderWidth: 1,
+    borderColor: '#2A3142',
+  },
+  loadingState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  loadingText: {
+    color: '#6B7288',
+    fontSize: 14,
+  },
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    padding: 20,
+    paddingBottom: 36,
+    gap: 10,
+  },
+  errorText: {
+    color: '#FF8A8A',
+    fontSize: 13,
+    marginBottom: 8,
+  },
+  sectionTitle: {
+    color: '#F4F6FB',
+    fontSize: 17,
+    fontWeight: '800',
+    marginTop: 4,
+  },
+  sectionHint: {
+    color: '#6B7288',
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 8,
+  },
+  rulesList: {
+    gap: 10,
+  },
+  ruleCard: {
+    backgroundColor: '#121722',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#2A3550',
+    padding: 14,
+    gap: 6,
+  },
+  ruleTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  ruleCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  ruleName: {
+    color: '#F4F6FB',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  rulePlatform: {
+    color: '#9EB8F0',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  ruleCondition: {
+    color: '#A8B0C2',
+    fontSize: 13,
+  },
+  ruleReply: {
+    color: '#D0D5E0',
+    fontSize: 13,
+    fontStyle: 'italic',
+  },
+  ruleMeta: {
+    color: '#6EE7A0',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  historyTitle: {
+    marginTop: 18,
+  },
+  emptyHistory: {
+    backgroundColor: '#10141D',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#232A38',
+    padding: 16,
+  },
+  emptyHistoryText: {
+    color: '#6B7288',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  historyList: {
+    gap: 10,
+  },
+  historyCard: {
+    backgroundColor: '#10141D',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#232A38',
+    padding: 14,
+    gap: 6,
+  },
+  historyHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+    alignItems: 'flex-start',
+  },
+  historySummary: {
+    flex: 1,
+    color: '#E8ECF5',
+    fontSize: 14,
+    fontWeight: '600',
+    lineHeight: 20,
+  },
+  historyTime: {
+    color: '#6B7288',
+    fontSize: 11,
+  },
+  historyMeta: {
+    color: '#8B93A8',
+    fontSize: 12,
+  },
+  historyReply: {
+    color: '#9DB9F0',
+    fontSize: 12,
+    fontStyle: 'italic',
+  },
+});

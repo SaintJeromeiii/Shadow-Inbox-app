@@ -3,19 +3,32 @@ import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import type { TriagedNotification } from '../types/notification';
+import { getRelayUrl } from './emailService';
 
 const ALERTED_IDS_KEY = '@shadow_inbox/alerted_action_ids';
-const ANDROID_CHANNEL_ID = 'shadow-inbox-action-required';
+const PUSH_TOKEN_KEY = '@shadow_inbox/expo_push_token';
+export const ANDROID_HIGH_PRIORITY_CHANNEL_ID = 'shadow-inbox-high-priority';
+const HIGH_URGENCY_THRESHOLD = 7;
 
 export type NotificationMode = 'native' | 'expo-go-fallback';
 
 export function getNotificationMode(): NotificationMode {
-  // Remote/local push APIs are blocked in Expo Go on Android (SDK 53+).
-  // Local notifications on iOS in Expo Go still work; use a dev build for production.
   if (Constants.appOwnership === 'expo' && Platform.OS === 'android') {
     return 'expo-go-fallback';
   }
   return 'native';
+}
+
+export function resolvePriorityLevel(urgencyScore: number): 'high' | 'medium' | 'low' {
+  if (urgencyScore >= HIGH_URGENCY_THRESHOLD) return 'high';
+  if (urgencyScore >= 4) return 'medium';
+  return 'low';
+}
+
+export function shouldSendPriorityAlert(notification: TriagedNotification): boolean {
+  const triage = notification.triage;
+  if (!triage || triage.category !== 'action_required') return false;
+  return resolvePriorityLevel(triage.urgencyScore) === 'high';
 }
 
 export function configureNotificationHandler(): void {
@@ -37,15 +50,16 @@ export async function ensureAndroidNotificationChannel(): Promise<void> {
   if (Platform.OS !== 'android') return;
   if (getNotificationMode() === 'expo-go-fallback') return;
 
-  await Notifications.setNotificationChannelAsync(ANDROID_CHANNEL_ID, {
-    name: 'Action Required',
-    description: 'Urgent Shadow Inbox items that need your reply',
+  await Notifications.setNotificationChannelAsync(ANDROID_HIGH_PRIORITY_CHANNEL_ID, {
+    name: 'High Priority Alerts',
+    description: 'Critical Shadow Inbox emails that need immediate attention',
     importance: Notifications.AndroidImportance.HIGH,
-    vibrationPattern: [0, 250, 250, 250],
+    vibrationPattern: [0, 280, 180, 280],
     lightColor: '#FF6B6B',
     sound: 'default',
     enableVibrate: true,
     showBadge: true,
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
   });
 }
 
@@ -71,6 +85,80 @@ export async function requestNotificationPermissions(): Promise<boolean> {
     requested.granted ||
     requested.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL
   );
+}
+
+async function getExpoProjectId(): Promise<string | undefined> {
+  return (
+    Constants.expoConfig?.extra?.eas?.projectId ??
+    Constants.easConfig?.projectId
+  );
+}
+
+export async function getDevicePushToken(): Promise<string | null> {
+  if (getNotificationMode() === 'expo-go-fallback') {
+    return null;
+  }
+
+  const granted = await requestNotificationPermissions();
+  if (!granted) return null;
+
+  const projectId = await getExpoProjectId();
+  if (!projectId) {
+    console.warn('[Shadow Inbox] Missing Expo project ID — cannot fetch push token.');
+    return null;
+  }
+
+  const token = await Notifications.getExpoPushTokenAsync({ projectId });
+  return token.data;
+}
+
+export async function registerDeviceWithRelay(): Promise<boolean> {
+  if (getNotificationMode() === 'expo-go-fallback') {
+    return false;
+  }
+
+  try {
+    const pushToken = await getDevicePushToken();
+    if (!pushToken) return false;
+
+    const previousToken = await AsyncStorage.getItem(PUSH_TOKEN_KEY);
+    if (previousToken && previousToken !== pushToken) {
+      await unregisterDeviceFromRelay(previousToken);
+    }
+
+    const response = await fetch(`${getRelayUrl()}/api/devices/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pushToken,
+        platform: Platform.OS,
+        deviceName: Constants.deviceName ?? null,
+      }),
+    });
+
+    if (!response.ok) {
+      const body = (await response.json().catch(() => ({}))) as { error?: string };
+      throw new Error(body.error ?? `Relay returned ${response.status}`);
+    }
+
+    await AsyncStorage.setItem(PUSH_TOKEN_KEY, pushToken);
+    return true;
+  } catch (error) {
+    console.warn('[Shadow Inbox] Device push registration failed:', error);
+    return false;
+  }
+}
+
+export async function unregisterDeviceFromRelay(pushToken: string): Promise<void> {
+  try {
+    await fetch(`${getRelayUrl()}/api/devices/unregister`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pushToken }),
+    });
+  } catch (error) {
+    console.warn('[Shadow Inbox] Device push unregister failed:', error);
+  }
 }
 
 export async function loadAlertedActionIds(): Promise<Set<string>> {
@@ -105,23 +193,29 @@ export function parseSenderDisplayName(sender: string): string {
   return email?.[0] ?? sender;
 }
 
-function buildAlertContent(notification: TriagedNotification): {
+function buildAlertContent(
+  notification: TriagedNotification,
+  accountLabel = 'Shadow Inbox',
+): {
   title: string;
   body: string;
 } {
   const senderName = parseSenderDisplayName(notification.sender);
-  const subjectLine = parseSubjectLine(notification.rawText);
+  const reason =
+    notification.triage?.cleanSummary?.trim() ||
+    'Requires your immediate attention.';
 
   return {
-    title: '🚨 Shadow Inbox Action Required',
-    body: `${senderName}: ${subjectLine}`,
+    title: `🚨 High Priority ${accountLabel}`,
+    body: `From: ${senderName}: ${reason}`,
   };
 }
 
 export async function scheduleActionRequiredAlert(
   notification: TriagedNotification,
+  accountLabel = 'Shadow Inbox',
 ): Promise<void> {
-  const { title, body } = buildAlertContent(notification);
+  const { title, body } = buildAlertContent(notification, accountLabel);
 
   if (getNotificationMode() === 'expo-go-fallback') {
     Alert.alert(title, body);
@@ -135,10 +229,13 @@ export async function scheduleActionRequiredAlert(
         body,
         sound: true,
         priority: Notifications.AndroidNotificationPriority.HIGH,
-        ...(Platform.OS === 'android' && { channelId: ANDROID_CHANNEL_ID }),
+        ...(Platform.OS === 'android' && {
+          channelId: ANDROID_HIGH_PRIORITY_CHANNEL_ID,
+        }),
         data: {
           notificationId: notification.id,
           category: 'action_required',
+          priorityLevel: 'high',
         },
       },
       trigger: null,
@@ -155,16 +252,17 @@ export async function scheduleActionRequiredAlert(
 export async function alertNewActionRequiredItems(
   notifications: TriagedNotification[],
   alertedIds: Set<string>,
+  accountLabel = 'Shadow Inbox',
 ): Promise<Set<string>> {
   const nextAlertedIds = new Set(alertedIds);
   let changed = false;
 
   for (const notification of notifications) {
     if (notification.archived) continue;
-    if (notification.triage?.category !== 'action_required') continue;
+    if (!shouldSendPriorityAlert(notification)) continue;
     if (nextAlertedIds.has(notification.id)) continue;
 
-    await scheduleActionRequiredAlert(notification);
+    await scheduleActionRequiredAlert(notification, accountLabel);
     nextAlertedIds.add(notification.id);
     changed = true;
   }

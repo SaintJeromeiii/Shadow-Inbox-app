@@ -107,8 +107,9 @@ export default function AccountSwitcherSheet({
           >
             {accounts.map((account) => {
               const selected = account.key === activeAccount;
-              const canRemove = Boolean(account.oauth && onRemove);
+              const isOAuthAccount = Boolean(account.oauth);
               const isRemoving = removingAccountKey === account.key;
+              const signOutLabel = isOAuthAccount ? 'Disconnect' : 'Sign out';
 
               return (
                 <View key={account.key} style={styles.accountRowWrap}>
@@ -131,6 +132,9 @@ export default function AccountSwitcherSheet({
                     <View style={styles.accountCopy}>
                       <Text style={styles.accountLabel}>{account.label}</Text>
                       <Text style={styles.accountEmail}>{maskEmail(account.email)}</Text>
+                      <Text style={styles.accountKind}>
+                        {isOAuthAccount ? 'Linked via Google' : 'Configured on Mac relay'}
+                      </Text>
                     </View>
                     {selected ? (
                       <Ionicons name="checkmark-circle" size={22} color="#6EE7A0" />
@@ -138,7 +142,7 @@ export default function AccountSwitcherSheet({
                       <Ionicons name="chevron-forward" size={18} color="#5C6478" />
                     )}
                   </Pressable>
-                  {canRemove ? (
+                  {onRemove ? (
                     <Pressable
                       style={({ pressed }) => [
                         styles.removeButton,
@@ -147,12 +151,16 @@ export default function AccountSwitcherSheet({
                       ]}
                       onPress={() => onRemove(account)}
                       disabled={isRemoving}
-                      accessibilityLabel={`Remove ${account.label}`}
+                      accessibilityLabel={`${signOutLabel} ${account.label}`}
                     >
                       {isRemoving ? (
                         <Ionicons name="hourglass-outline" size={18} color="#FF8A8A" />
                       ) : (
-                        <Ionicons name="trash-outline" size={18} color="#FF8A8A" />
+                        <Ionicons
+                          name={isOAuthAccount ? 'trash-outline' : 'log-out-outline'}
+                          size={18}
+                          color="#FF8A8A"
+                        />
                       )}
                     </Pressable>
                   ) : null}
@@ -160,6 +168,15 @@ export default function AccountSwitcherSheet({
               );
             })}
           </ScrollView>
+
+          {accounts.length === 0 ? (
+            <View style={styles.emptyAccounts}>
+              <Text style={styles.emptyAccountsTitle}>No accounts on this device</Text>
+              <Text style={styles.emptyAccountsBody}>
+                Sign out removed every inbox from this phone. Link a Google account to continue.
+              </Text>
+            </View>
+          ) : null}
 
           <Pressable
             style={({ pressed }) => [
@@ -276,6 +293,26 @@ const styles = StyleSheet.create({
   accountEmail: {
     color: '#8B93A8',
     fontSize: 13,
+  },
+  accountKind: {
+    color: '#5C6478',
+    fontSize: 11,
+    marginTop: 2,
+  },
+  emptyAccounts: {
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+    gap: 6,
+  },
+  emptyAccountsTitle: {
+    color: '#D0D5E0',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  emptyAccountsBody: {
+    color: '#6B7288',
+    fontSize: 13,
+    lineHeight: 18,
   },
   removeButton: {
     width: 44,

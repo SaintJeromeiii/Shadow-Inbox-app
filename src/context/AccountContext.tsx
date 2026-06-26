@@ -11,9 +11,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   BUILTIN_ACCOUNT_PROFILES,
   findAccountProfile,
-  isKnownAccountKey,
 } from '../constants/accounts';
 import { fetchRelayAccounts } from '../services/authService';
+import { getHiddenAccountKeys } from '../services/accountStorage';
 import { setActiveAccountKey } from '../services/emailService';
 import type { AccountKey, AccountProfile } from '../types/account';
 
@@ -37,17 +37,26 @@ export function AccountProvider({ children }: { children: ReactNode }) {
 
   const refreshAccounts = useCallback(async () => {
     try {
-      const remoteAccounts = await fetchRelayAccounts();
+      const [remoteAccounts, hidden] = await Promise.all([
+        fetchRelayAccounts(),
+        getHiddenAccountKeys(),
+      ]);
+
       if (remoteAccounts.length > 0) {
-        setAccounts(remoteAccounts);
-        return remoteAccounts;
+        const visible = remoteAccounts.filter((account) => !hidden.has(account.key));
+        setAccounts(visible);
+        return visible;
       }
     } catch (error) {
       console.warn('[Shadow Inbox] Could not load accounts from relay:', error);
     }
 
-    setAccounts(BUILTIN_ACCOUNT_PROFILES);
-    return BUILTIN_ACCOUNT_PROFILES;
+    const hidden = await getHiddenAccountKeys();
+    const visibleBuiltin = BUILTIN_ACCOUNT_PROFILES.filter(
+      (account) => !hidden.has(account.key),
+    );
+    setAccounts(visibleBuiltin);
+    return visibleBuiltin;
   }, []);
 
   useEffect(() => {
@@ -62,8 +71,13 @@ export function AccountProvider({ children }: { children: ReactNode }) {
       if (cancelled) return;
 
       const available = remoteAccounts.length > 0 ? remoteAccounts : BUILTIN_ACCOUNT_PROFILES;
+      const hidden = await getHiddenAccountKeys();
+      const visible = available.filter((account) => !hidden.has(account.key));
       const initialAccount =
-        saved && isKnownAccountKey(saved, available) ? saved : 'personal';
+        saved &&
+        visible.some((account) => account.key === saved)
+          ? saved
+          : visible[0]?.key ?? 'personal';
 
       setActiveAccountState(initialAccount);
       setActiveAccountKey(initialAccount);

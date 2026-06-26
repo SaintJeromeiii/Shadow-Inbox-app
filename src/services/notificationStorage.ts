@@ -59,6 +59,8 @@ function mergeWithSeed(
       shadowLabels: saved.shadowLabels ?? seedItem.shadowLabels,
       gmailMessageId: saved.gmailMessageId ?? seedItem.gmailMessageId,
       messageIdHeader: saved.messageIdHeader ?? seedItem.messageIdHeader,
+      channelName: saved.channelName ?? seedItem.channelName,
+      replyTarget: saved.replyTarget ?? seedItem.replyTarget,
     };
   });
 }

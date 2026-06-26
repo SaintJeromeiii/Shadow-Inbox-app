@@ -1,5 +1,5 @@
 import type { AccountProfile } from '../types/account';
-import { getRelayUrl } from './emailService';
+import { relayFetch } from './emailService';
 
 export type GoogleOAuthClientType = 'android' | 'web';
 
@@ -35,9 +35,7 @@ async function parseRelayJson<T extends { error?: string }>(
 }
 
 export async function fetchRelayAccounts(): Promise<AccountProfile[]> {
-  const response = await fetch(`${getRelayUrl()}/api/accounts`, {
-    method: 'GET',
-  });
+  const response = await relayFetch('/api/accounts', { method: 'GET' });
 
   if (!response.ok) {
     throw new Error(`Failed to load accounts (${response.status})`);
@@ -50,7 +48,7 @@ export async function fetchRelayAccounts(): Promise<AccountProfile[]> {
 export async function removeRelayAccount(
   accountKey: string,
 ): Promise<{ success: boolean; accounts?: AccountProfile[]; error?: string }> {
-  const response = await fetch(`${getRelayUrl()}/api/accounts/remove`, {
+  const response = await relayFetch('/api/accounts/remove', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ accountKey }),
@@ -82,26 +80,33 @@ export async function exchangeGoogleAuthCode(input: {
   clientId?: string;
   clientType?: GoogleOAuthClientType;
 }): Promise<GoogleAuthCallbackResult> {
-  const response = await fetch(`${getRelayUrl()}/api/auth/google/callback`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
-  });
+  try {
+    const response = await relayFetch('/api/auth/google/callback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
 
-  const data = await parseRelayJson<GoogleAuthCallbackResult & { error?: string }>(
-    response,
-  );
+    const data = await parseRelayJson<GoogleAuthCallbackResult & { error?: string }>(
+      response,
+    );
 
-  if (!response.ok) {
+    if (!response.ok) {
+      return {
+        success: false,
+        error: data.error ?? `OAuth callback failed (${response.status})`,
+      };
+    }
+
+    return {
+      success: true,
+      account: data.account,
+      accountKey: data.accountKey,
+    };
+  } catch (error) {
     return {
       success: false,
-      error: data.error ?? `OAuth callback failed (${response.status})`,
+      error: error instanceof Error ? error.message : 'OAuth callback failed.',
     };
   }
-
-  return {
-    success: true,
-    account: data.account,
-    accountKey: data.accountKey,
-  };
 }

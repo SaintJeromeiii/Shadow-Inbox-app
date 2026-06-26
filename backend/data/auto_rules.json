@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "1",
+      "name": "Discord fixed acknowledgment",
+      "platform": "discord",
+      "condition": "contains word 'fixed'",
+      "action": "reply",
+      "replyText": "Awesome, thanks for testing!",
+      "autoCloseTask": true,
+      "enabled": true,
+      "createdAt": "2026-06-26T00:00:00.000Z",
+      "updatedAt": "2026-06-26T00:00:00.000Z"
+    },
+    {
+      "id": "2",
+      "name": "Slack LGTM auto-close",
+      "platform": "slack",
+      "condition": "contains word 'lgtm'",
+      "action": "reply",
+      "replyText": "Thanks — marking this resolved.",
+      "autoCloseTask": true,
+      "enabled": true,
+      "createdAt": "2026-06-26T00:00:00.000Z",
+      "updatedAt": "2026-06-26T00:00:00.000Z"
+    },
+    {
+      "id": "3",
+      "name": "FYI newsletter auto-ignore",
+      "platform": "email",
+      "condition": "category:fyi",
+      "action": "archive",
+      "replyText": null,
+      "autoCloseTask": true,
+      "enabled": false,
+      "createdAt": "2026-06-26T00:00:00.000Z",
+      "updatedAt": "2026-06-26T00:00:00.000Z"
+    }
+  ]
+}

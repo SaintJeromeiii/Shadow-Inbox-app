@@ -15,3 +15,11 @@ export const SOURCE_LABELS: Record<NotificationSource, string> = {
   SMS: 'SMS',
   WhatsApp: 'WhatsApp',
 };
+
+export const SOURCE_PILL_EMOJI: Record<NotificationSource, string> = {
+  Email: '✉️',
+  Slack: '💬',
+  Discord: '🎮',
+  SMS: '📱',
+  WhatsApp: '💚',
+};

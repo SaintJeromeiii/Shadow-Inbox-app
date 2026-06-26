@@ -3,6 +3,10 @@ const {
   upsertOAuthAccount,
   updateOAuthTokens,
 } = require('./userTokens');
+const {
+  GOOGLE_OAUTH_SCOPES,
+  accountHasCalendarScope,
+} = require('./googleOAuthScopes');
 
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_USERINFO_URL = 'https://www.googleapis.com/oauth2/v2/userinfo';
@@ -217,6 +221,14 @@ async function completeGoogleOAuth({
     oauthClientType: client.clientType,
   });
 
+  if (!accountHasCalendarScope(saved)) {
+    console.warn(
+      `[GoogleOAuth] Linked ${profile.email} without Calendar scope. ` +
+        `Re-sign in after enabling calendar.readonly in the app. ` +
+        `Expected one of: ${GOOGLE_OAUTH_SCOPES.join(', ')}`,
+    );
+  }
+
   return saved;
 }
 
@@ -225,4 +237,6 @@ module.exports = {
   getValidAccessToken,
   refreshAccessToken,
   exchangeAuthorizationCode,
+  GOOGLE_OAUTH_SCOPES,
+  accountHasCalendarScope,
 };

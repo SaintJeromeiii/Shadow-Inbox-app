@@ -28,7 +28,7 @@ export default function BriefingCard({
   error,
   onDismiss,
 }: BriefingCardProps) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
 
   return (
     <View style={styles.wrapper}>
@@ -103,7 +103,6 @@ export default function BriefingCard({
 
 const styles = StyleSheet.create({
   wrapper: {
-    marginHorizontal: 16,
     marginBottom: 12,
     borderRadius: 18,
     overflow: 'hidden',

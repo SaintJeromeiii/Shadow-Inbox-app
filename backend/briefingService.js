@@ -88,12 +88,12 @@ function mergeTriageOverlay(notifications, triageItems) {
   });
 }
 
-function buildBriefingItems({ triageByAccount = null } = {}) {
+async function buildBriefingItems({ triageByAccount = null } = {}) {
   const accounts = listAccounts();
   const items = [];
 
   for (const account of accounts) {
-    const rawNotifications = readNotifications(account.key);
+    const rawNotifications = await readNotifications(account.key);
     const overlay = triageByAccount?.[account.key];
     const notifications = mergeTriageOverlay(rawNotifications, overlay);
 
@@ -248,7 +248,7 @@ async function callBriefingLlm({ items, knowledgeBase }) {
 }
 
 async function generateDailyBriefing({ triageByAccount = null, knowledgeBase = '' } = {}) {
-  const { accounts, items } = buildBriefingItems({ triageByAccount });
+  const { accounts, items } = await buildBriefingItems({ triageByAccount });
   const llmResult = await callBriefingLlm({ items, knowledgeBase });
 
   const stats = {

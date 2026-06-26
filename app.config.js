@@ -42,6 +42,8 @@ module.exports = {
           NSAllowsLocalNetworking: true,
         },
         ITSAppUsesNonExemptEncryption: false,
+        NSMicrophoneUsageDescription:
+          'Shadow Inbox uses the microphone for hands-free voice commands to rewrite email drafts.',
       },
     },
     android: {
@@ -71,6 +73,13 @@ module.exports = {
         '@react-native-google-signin/google-signin',
         {
           iosUrlScheme,
+        },
+      ],
+      [
+        'expo-av',
+        {
+          microphonePermission:
+            'Allow Shadow Inbox to record voice commands for email drafts.',
         },
       ],
     ],
