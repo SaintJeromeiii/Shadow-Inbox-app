@@ -71,21 +71,24 @@ function guessMimeType(filePath, providedMime) {
   return 'audio/m4a';
 }
 
-async function transcribeAudioFile(filePath, mimeType) {
+function extensionForMime(resolvedMime) {
+  if (resolvedMime.includes('3gp')) return '3gp';
+  if (resolvedMime.includes('wav')) return 'wav';
+  if (resolvedMime.includes('mp4')) return 'mp4';
+  return 'm4a';
+}
+
+async function transcribeAudioBuffer(buffer, mimeType, filename = 'voice.m4a') {
   if (!API_KEY || API_KEY.includes('your_')) {
     throw new Error('OpenAI API key is required for voice transcription.');
   }
 
-  const buffer = fs.readFileSync(filePath);
-  const resolvedMime = guessMimeType(filePath, mimeType);
-  const extension = resolvedMime.includes('3gp')
-    ? '3gp'
-    : resolvedMime.includes('wav')
-      ? 'wav'
-      : 'm4a';
+  const resolvedMime = mimeType || 'audio/m4a';
+  const extension = extensionForMime(resolvedMime);
+  const safeName = filename.includes('.') ? filename : `voice.${extension}`;
 
   const form = new FormData();
-  form.append('file', new Blob([buffer], { type: resolvedMime }), `voice.${extension}`);
+  form.append('file', new Blob([buffer], { type: resolvedMime }), safeName);
   form.append('model', WHISPER_MODEL);
   form.append('language', 'en');
 
@@ -116,6 +119,13 @@ async function transcribeAudioFile(filePath, mimeType) {
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+async function transcribeAudioFile(filePath, mimeType) {
+  const buffer = fs.readFileSync(filePath);
+  const resolvedMime = guessMimeType(filePath, mimeType);
+  const extension = extensionForMime(resolvedMime);
+  return transcribeAudioBuffer(buffer, resolvedMime, `voice.${extension}`);
 }
 
 async function callVoiceRedraftLlm({
@@ -218,5 +228,6 @@ async function processVoiceCommand({
 
 module.exports = {
   transcribeAudioFile,
+  transcribeAudioBuffer,
   processVoiceCommand,
 };

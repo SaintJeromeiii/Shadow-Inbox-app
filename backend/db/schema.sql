@@ -97,8 +97,27 @@ create table if not exists public.expo_push_tokens (
 create index if not exists idx_expo_push_tokens_account
   on public.expo_push_tokens (account_key, last_seen_at desc);
 
+create table if not exists public.voice_notes (
+  id text primary key,
+  account_key text not null default 'personal',
+  category text not null,
+  project text not null default 'General',
+  summary text not null,
+  transcript text not null,
+  structured_data jsonb not null default '{}'::jsonb,
+  routed_to text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_voice_notes_account_created
+  on public.voice_notes (account_key, created_at desc);
+
+create index if not exists idx_voice_notes_category
+  on public.voice_notes (category, created_at desc);
+
 -- Backend uses the service role key server-side. Disable RLS so inserts succeed.
 alter table public.notification_feed disable row level security;
 alter table public.finance_transactions disable row level security;
 alter table public.auto_pilot_rules disable row level security;
 alter table public.expo_push_tokens disable row level security;
+alter table public.voice_notes disable row level security;

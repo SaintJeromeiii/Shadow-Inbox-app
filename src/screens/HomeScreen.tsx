@@ -40,6 +40,7 @@ import AccountSwitcherSheet from '../components/AccountSwitcherSheet';
 import BriefingCard from '../components/BriefingCard';
 import TaskBoard from '../components/TaskBoard';
 import FinanceRunwayStrip from '../components/FinanceRunwayStrip';
+import VoiceNoteButton from '../components/VoiceNoteButton';
 import KnowledgeScreen from '../screens/KnowledgeScreen';
 import AutoPilotScreen from '../screens/AutoPilotScreen';
 import { useGoogleSignIn } from '../hooks/useGoogleSignIn';
@@ -1047,6 +1048,13 @@ export default function HomeScreen() {
           </View>
         </View>
         <View style={styles.headerActions}>
+          <VoiceNoteButton
+            accountKey={activeAccount}
+            onIngested={() => {
+              void loadTasks();
+              void loadFinances();
+            }}
+          />
           <Pressable
             style={({ pressed }) => [
               styles.knowledgePill,

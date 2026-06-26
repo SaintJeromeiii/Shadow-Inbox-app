@@ -43,7 +43,7 @@ module.exports = {
         },
         ITSAppUsesNonExemptEncryption: false,
         NSMicrophoneUsageDescription:
-          'Shadow Inbox uses the microphone for hands-free voice commands to rewrite email drafts.',
+          'Shadow Inbox uses the microphone for voice notes and hands-free email draft commands.',
       },
     },
     android: {
@@ -81,7 +81,14 @@ module.exports = {
         'expo-av',
         {
           microphonePermission:
-            'Allow Shadow Inbox to record voice commands for email drafts.',
+            'Allow Shadow Inbox to record voice notes and email draft commands.',
+        },
+      ],
+      [
+        'expo-audio',
+        {
+          microphonePermission:
+            'Allow Shadow Inbox to record voice notes and email draft commands.',
         },
       ],
     ],

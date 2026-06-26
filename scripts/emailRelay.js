@@ -41,6 +41,7 @@ const broadcastRouter = require('../backend/routes/broadcast');
 const autoPilotRouter = require('../backend/routes/autoPilot');
 const financesRouter = require('../backend/routes/finances');
 const notificationsRouter = require('../backend/routes/notifications');
+const voiceRouter = require('../backend/routes/voice');
 const { handleSlackWebhook } = require('../backend/slackWebhook');
 
 const knowledgeBase = loadKnowledgeBase();
@@ -139,6 +140,7 @@ app.use('/api/broadcast', broadcastRouter);
 app.use('/api/auto-pilot', autoPilotRouter);
 app.use('/api/finances', financesRouter);
 app.use('/api/notifications', notificationsRouter);
+app.use('/api/voice', voiceRouter);
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', service: 'shadow-inbox-email-relay' });

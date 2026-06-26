@@ -177,6 +177,34 @@ function completeTasksForNotification(accountKey, emailId, options = {}) {
   return updated;
 }
 
+function appendVoiceTask(accountKey, input) {
+  const store = readTaskStore();
+  const now = new Date().toISOString();
+  const title = String(input.title || 'Voice task').trim().slice(0, 240);
+  const emailId = String(input.emailId || `voice-${crypto.randomBytes(4).toString('hex')}`);
+
+  const task = {
+    id: input.id || `task-voice-${crypto.randomBytes(4).toString('hex')}`,
+    emailId,
+    accountKey,
+    sender: 'Voice Note',
+    sourceSubject: input.category === 'Bug' ? 'Voice bug report' : 'Voice task',
+    sourceSummary: String(input.summary || '').trim(),
+    title,
+    project: String(input.project || 'General').trim(),
+    dueHint: null,
+    completed: false,
+    completedAt: null,
+    createdAt: now,
+    updatedAt: now,
+    source: input.source || 'voice_note',
+  };
+
+  store.tasks = [task, ...store.tasks];
+  writeTaskStore(store);
+  return task;
+}
+
 async function toggleTaskComplete(taskId, options = {}) {
   const archiveSource = options.archiveSource !== false;
   const store = readTaskStore();
@@ -227,6 +255,7 @@ module.exports = {
   TASKS_PATH,
   inferProject,
   syncTasksFromTriage,
+  appendVoiceTask,
   listTasks,
   getTaskById,
   completeTasksForNotification,
