@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "52549680215",
-    "project_id": "shadow-inbox-app",
-    "storage_bucket": "shadow-inbox-app.firebasestorage.app"
+    "project_number": "YOUR_PROJECT_NUMBER",
+    "project_id": "your-firebase-project-id",
+    "storage_bucket": "your-firebase-project-id.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:52549680215:android:7b68a1af3a474ddb8d3712",
+        "mobilesdk_app_id": "1:YOUR_PROJECT_NUMBER:android:YOUR_APP_ID",
         "android_client_info": {
           "package_name": "com.saintjeromeiii.shadowinbox"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyB2yK3b2CFXaM45TWmoWDa_miBr4H6ufRo"
+          "current_key": "YOUR_FIREBASE_ANDROID_API_KEY"
         }
       ],
       "services": {
