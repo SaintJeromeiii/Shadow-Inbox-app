@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { getSupabase } = require('./supabaseClient');
+const { resolveFinanceAccountKeys } = require('./accounts');
 
 const LEDGER_PATH = path.join(__dirname, 'data', 'finances.json');
 const VALID_PROJECTS = new Set(['AlphaRounds', 'DealShield', 'ServiceLog', 'General']);
@@ -168,11 +169,13 @@ function isInMonth(dateString, monthKey) {
 
 async function buildFinanceSummary(options = {}) {
   const monthKey = options.monthKey || getMonthKey();
-  const accountKey = options.accountKey || null;
+  const accountKeys = options.accountKey
+    ? resolveFinanceAccountKeys(options.accountKey)
+    : null;
   const store = await readLedger();
 
   const filtered = store.transactions.filter((tx) => {
-    if (accountKey && tx.accountKey !== accountKey) return false;
+    if (accountKeys && !accountKeys.includes(tx.accountKey)) return false;
     return isInMonth(tx.date, monthKey);
   });
 
@@ -190,7 +193,7 @@ async function buildFinanceSummary(options = {}) {
   }
 
   const transactions = [...store.transactions]
-    .filter((tx) => (accountKey ? tx.accountKey === accountKey : true))
+    .filter((tx) => (accountKeys ? accountKeys.includes(tx.accountKey) : true))
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
     .slice(0, options.limit || 40);
 

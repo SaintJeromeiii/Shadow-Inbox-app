@@ -1,5 +1,5 @@
 const express = require('express');
-const { resolveAccountKey } = require('../accounts');
+const { resolveAccountKey, resolveFinanceAccountKeys } = require('../accounts');
 const { buildFinanceSummary } = require('../financeLedger');
 
 const router = express.Router();
@@ -20,6 +20,7 @@ router.get('/summary', async (req, res) => {
     res.json({
       success: true,
       accountKey,
+      financeAccountKeys: resolveFinanceAccountKeys(accountKey),
       ...summary,
     });
   } catch (error) {

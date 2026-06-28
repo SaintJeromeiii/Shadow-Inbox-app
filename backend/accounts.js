@@ -116,6 +116,34 @@ function resolveAccountKey(raw) {
   return 'personal';
 }
 
+function normalizeAccountEmail(email) {
+  return String(email || '').trim().toLowerCase();
+}
+
+function getAccountEmail(accountKey) {
+  const account = getAccount(resolveAccountKey(accountKey));
+  return account?.email ?? null;
+}
+
+/** All ledger keys that share the same inbox email (builtin + OAuth aliases). */
+function resolveFinanceAccountKeys(accountKey) {
+  const resolved = resolveAccountKey(accountKey);
+  const targetEmail = normalizeAccountEmail(getAccountEmail(resolved));
+  if (!targetEmail) {
+    return [resolved];
+  }
+
+  const keys = new Set();
+  for (const key of listAccountKeys()) {
+    const email = normalizeAccountEmail(getAccountEmail(key));
+    if (email === targetEmail) {
+      keys.add(key);
+    }
+  }
+
+  return keys.size > 0 ? [...keys] : [resolved];
+}
+
 module.exports = {
   DATA_DIR,
   ACCOUNT_DEFINITIONS,
@@ -123,4 +151,5 @@ module.exports = {
   listAccounts,
   listAccountKeys,
   resolveAccountKey,
+  resolveFinanceAccountKeys,
 };
