@@ -1,5 +1,6 @@
 import type { AccountKey } from '../types/account';
 import type { FinanceSummary } from '../types/finance';
+import { fetchRelayAccounts } from './authService';
 import { getRelayUrl } from './emailService';
 
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -24,7 +25,15 @@ async function fetchWithTimeout(
   }
 }
 
-export async function fetchFinanceSummary(
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+function isEmptySummary(summary: FinanceSummary): boolean {
+  return summary.transactionCount === 0 && summary.totalMonthToDate === 0;
+}
+
+async function fetchFinanceSummaryForKey(
   accountKey?: AccountKey,
 ): Promise<FinanceSummary> {
   const params = new URLSearchParams();
@@ -52,6 +61,49 @@ export async function fetchFinanceSummary(
   }
 
   return (await response.json()) as FinanceSummary;
+}
+
+async function resolveSiblingAccountKeys(accountKey: AccountKey): Promise<AccountKey[]> {
+  const accounts = await fetchRelayAccounts();
+  const active = accounts.find((account) => account.key === accountKey);
+  if (!active?.email) return [accountKey];
+
+  const email = normalizeEmail(active.email);
+  return accounts
+    .filter((account) => normalizeEmail(account.email) === email)
+    .map((account) => account.key);
+}
+
+export async function fetchFinanceSummary(
+  accountKey?: AccountKey,
+): Promise<FinanceSummary> {
+  if (!accountKey) {
+    return fetchFinanceSummaryForKey(undefined);
+  }
+
+  const primary = await fetchFinanceSummaryForKey(accountKey);
+  if (!isEmptySummary(primary)) {
+    return primary;
+  }
+
+  try {
+    const siblingKeys = await resolveSiblingAccountKeys(accountKey);
+    for (const siblingKey of siblingKeys) {
+      if (siblingKey === accountKey) continue;
+
+      const siblingSummary = await fetchFinanceSummaryForKey(siblingKey);
+      if (!isEmptySummary(siblingSummary)) {
+        return {
+          ...siblingSummary,
+          accountKey,
+        };
+      }
+    }
+  } catch (error) {
+    console.warn('[Shadow Inbox] Finance alias fallback failed:', error);
+  }
+
+  return primary;
 }
 
 export function formatUsd(amount: number): string {
