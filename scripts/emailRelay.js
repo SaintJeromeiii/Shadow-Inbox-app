@@ -23,7 +23,6 @@ const { getAccount, listAccounts, resolveAccountKey } = require('../backend/acco
 const { fetchNotifications } = require('./fetchNotifications');
 const { completeGoogleOAuth, getValidAccessToken } = require('../backend/googleOAuth');
 const { toPublicProfile, getOAuthAccount, removeOAuthAccount } = require('../backend/userTokens');
-const { generateDailyBriefing } = require('../backend/briefingService');
 const { ensureShadowLabelSet } = require('../backend/shadowLabels');
 const { applyShadowLabelsToNotification } = require('../backend/shadowLabels');
 const { writeNotifications } = require('../backend/notificationFeed');
@@ -42,6 +41,7 @@ const autoPilotRouter = require('../backend/routes/autoPilot');
 const financesRouter = require('../backend/routes/finances');
 const notificationsRouter = require('../backend/routes/notifications');
 const voiceRouter = require('../backend/routes/voice');
+const briefingRouter = require('../backend/routes/briefing');
 const { handleSlackWebhook } = require('../backend/slackWebhook');
 
 const knowledgeBase = loadKnowledgeBase();
@@ -141,6 +141,7 @@ app.use('/api/auto-pilot', autoPilotRouter);
 app.use('/api/finances', financesRouter);
 app.use('/api/notifications', notificationsRouter);
 app.use('/api/voice', voiceRouter);
+app.use('/api/briefing', briefingRouter);
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', service: 'shadow-inbox-email-relay' });
@@ -346,31 +347,6 @@ app.get('/api/emails', async (req, res) => {
     });
   }
 });
-
-async function handleBriefingRequest(req, res) {
-  const triageByAccount = req.body?.triageByAccount ?? null;
-
-  try {
-    const briefing = await generateDailyBriefing({
-      triageByAccount,
-      knowledgeBase,
-    });
-
-    console.log(
-      `[Relay] Generated briefing (${briefing.mode}) — ${briefing.stats.totalToday} emails across ${briefing.stats.accountCount} account(s).`,
-    );
-
-    res.status(200).json(briefing);
-  } catch (error) {
-    console.error('[Relay] GET /api/briefing failed:', error);
-    res.status(500).json({
-      error: error instanceof Error ? error.message : 'Failed to generate briefing.',
-    });
-  }
-}
-
-app.get('/api/briefing', handleBriefingRequest);
-app.post('/api/briefing', handleBriefingRequest);
 
 app.post('/api/emails/sync-labels', async (req, res) => {
   const accountKey = getAccountKeyFromRequest(req);

@@ -115,9 +115,26 @@ create index if not exists idx_voice_notes_account_created
 create index if not exists idx_voice_notes_category
   on public.voice_notes (category, created_at desc);
 
+create table if not exists public.executive_briefs (
+  id text primary key,
+  account_key text not null default 'all',
+  summary_text text not null,
+  urgency_level text not null default 'routine',
+  signal_count integer not null default 0,
+  mode text not null default 'live',
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_executive_briefs_account_created
+  on public.executive_briefs (account_key, created_at desc);
+
+create index if not exists idx_executive_briefs_urgency
+  on public.executive_briefs (urgency_level, created_at desc);
+
 -- Backend uses the service role key server-side. Disable RLS so inserts succeed.
 alter table public.notification_feed disable row level security;
 alter table public.finance_transactions disable row level security;
 alter table public.auto_pilot_rules disable row level security;
 alter table public.expo_push_tokens disable row level security;
 alter table public.voice_notes disable row level security;
+alter table public.executive_briefs disable row level security;

@@ -17,10 +17,15 @@ const HOLD_DELAY_MS = 220;
 
 interface VoiceNoteButtonProps {
   accountKey: AccountKey;
+  compact?: boolean;
   onIngested?: (message: string) => void;
 }
 
-export default function VoiceNoteButton({ accountKey, onIngested }: VoiceNoteButtonProps) {
+export default function VoiceNoteButton({
+  accountKey,
+  compact = false,
+  onIngested,
+}: VoiceNoteButtonProps) {
   const {
     isRecording,
     durationMillis,
@@ -151,6 +156,7 @@ export default function VoiceNoteButton({ accountKey, onIngested }: VoiceNoteBut
     <Pressable
       style={({ pressed }) => [
         styles.pill,
+        compact && styles.pillCompact,
         isRecording && styles.pillRecording,
         busy && styles.pillBusy,
         pressed && !busy && styles.pillPressed,
@@ -174,7 +180,7 @@ export default function VoiceNoteButton({ accountKey, onIngested }: VoiceNoteBut
         <Animated.View style={{ transform: [{ scale: isRecording ? pulseAnim : 1 }] }}>
           <Ionicons
             name={isRecording ? 'mic' : 'mic-outline'}
-            size={20}
+            size={compact ? 18 : 20}
             color={isRecording ? '#FCA5A5' : '#E2E8F0'}
           />
         </Animated.View>
@@ -198,6 +204,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#161922',
     borderWidth: 1,
     borderColor: 'rgba(148, 163, 184, 0.35)',
+  },
+  pillCompact: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
   },
   pillRecording: {
     borderColor: 'rgba(248, 113, 113, 0.65)',

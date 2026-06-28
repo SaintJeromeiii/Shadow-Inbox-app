@@ -1,34 +1,43 @@
 const { listAccounts, listAccountKeys } = require('./accounts');
 const { readNotifications } = require('./notificationFeed');
+const { appendExecutiveBrief } = require('./executiveBriefsLedger');
 
 const REQUEST_TIMEOUT_MS = 45_000;
+const BRIEFING_WINDOW_HOURS = 24;
 
-const BRIEFING_SYSTEM_PROMPT = `You are a world-class executive assistant preparing Jerome's Smart Morning Briefing.
+const EXECUTIVE_BRIEFING_SYSTEM_PROMPT = `You are an elite military Chief of Staff writing a daily Intelligence Brief. Summarize the last 24 hours of incoming data streams into a clean, highly scannable Markdown format.
 
-Jerome is a program analyst and app builder juggling federal resource management and three active apps: ServiceLog, DealShield, and AlphaRounds (closed beta / Google Play tester recruitment).
+Structure it exactly like this:
 
-Your job: synthesize today's inbox into a highly scannable executive briefing in markdown. Be ruthless about brevity — Jerome reads this on his phone in under 60 seconds.
+### ⚡ SITREP (Situation Report)
+- [2-sentence high-level overview of active signals]
 
-Output format (use exactly these section headers):
+### 🎯 Action Items & Priorities
+- **[High]** [Actionable item extracted from logs]
+- **[Routine]** [General maintenance/follow-up task]
 
-## Top Priorities
-- Bullet the 3–5 most urgent items across all inboxes. Lead with deadlines, blockers, and leadership asks.
-- Include account label in parentheses when helpful, e.g. "(Work)" or "(Personal)".
-
-## Testers & App Feedback
-- Surface anything related to ServiceLog, DealShield, AlphaRounds, beta testing, Google Play Console, tester recruitment, or app feedback.
-- If none found, write: "- No tester or app feedback emails today."
-
-## Quick Wins
-- List emails that can be instantly cleared: FYI items, newsletters already triaged as ignore, low-urgency acknowledgments, or one-tap archive candidates.
-- Keep to 3–6 bullets max.
+### 🔍 Signal Filtering
+A brief Markdown table matching: | Source | Critical Alert | Noise Status |
 
 Rules:
-- Use markdown bullets only (lines starting with "- ").
-- No preamble, no sign-off, no "Good morning" fluff.
-- Reference specific senders or subjects when it adds clarity.
-- Respect triage classifications provided — prioritize action_required, deprioritize ignore.
-- If the inbox is empty or all untriaged, say so plainly and suggest running Process Feed.`;
+- Use the exact section headers shown above.
+- Prioritize action_required and high-urgency signals in **[High]** bullets.
+- Deprioritize FYI, newsletters, and ignore-classified noise in the Signal Filtering table.
+- Be concise — Jerome reads this on his phone in under 60 seconds.
+- No preamble, no sign-off, no filler phrases.
+- Reference specific senders or subjects when it adds clarity.`;
+
+const QUIET_BRIEFING_MARKDOWN = `### ⚡ SITREP (Situation Report)
+- System quiet over the last 24 hours.
+- No inbound signals were detected across monitored data streams.
+
+### 🎯 Action Items & Priorities
+- **[Routine]** No immediate action items — inbox is clear.
+
+### 🔍 Signal Filtering
+| Source | Critical Alert | Noise Status |
+| --- | --- | --- |
+| All channels | None | Quiet |`;
 
 function getOpenAiConfig() {
   return {
@@ -61,12 +70,11 @@ function extractSubject(rawText) {
   return match ? match[1].trim() : '(No subject)';
 }
 
-function isToday(isoTimestamp) {
+function isWithinLastHours(isoTimestamp, hours = BRIEFING_WINDOW_HOURS) {
   const date = new Date(isoTimestamp);
   if (Number.isNaN(date.getTime())) return false;
-
-  const now = new Date();
-  return date.toDateString() === now.toDateString();
+  const cutoff = Date.now() - hours * 60 * 60 * 1000;
+  return date.getTime() >= cutoff;
 }
 
 function mergeTriageOverlay(notifications, triageItems) {
@@ -88,8 +96,41 @@ function mergeTriageOverlay(notifications, triageItems) {
   });
 }
 
-async function buildBriefingItems({ triageByAccount = null } = {}) {
-  const accounts = listAccounts();
+function inferUrgencyLevel(items) {
+  if (items.length === 0) return 'low';
+
+  const actionRequired = items.filter((item) => item.category === 'action_required');
+  const maxUrgency = actionRequired.reduce((max, item) => {
+    const score = Number(item.urgencyScore);
+    return Number.isFinite(score) ? Math.max(max, score) : max;
+  }, 0);
+
+  if (maxUrgency >= 8) return 'critical';
+  if (maxUrgency >= 6 || actionRequired.length >= 3) return 'elevated';
+  if (actionRequired.length > 0) return 'routine';
+  return 'low';
+}
+
+function buildBriefingStats(items, accountCount) {
+  return {
+    signalCount: items.length,
+    totalToday: items.length,
+    actionRequired: items.filter((item) => item.category === 'action_required').length,
+    fyi: items.filter((item) => item.category === 'fyi').length,
+    ignore: items.filter((item) => item.category === 'ignore').length,
+    untriaged: items.filter((item) => item.category === 'untriaged').length,
+    accountCount,
+  };
+}
+
+async function buildBriefingItemsLast24Hours({
+  accountKey = null,
+  triageByAccount = null,
+  hours = BRIEFING_WINDOW_HOURS,
+} = {}) {
+  const accounts = listAccounts().filter((account) =>
+    accountKey ? account.key === accountKey : true,
+  );
   const items = [];
 
   for (const account of accounts) {
@@ -99,7 +140,7 @@ async function buildBriefingItems({ triageByAccount = null } = {}) {
 
     for (const notification of notifications) {
       if (notification.archived) continue;
-      if (!isToday(notification.timestamp)) continue;
+      if (!isWithinLastHours(notification.timestamp, hours)) continue;
 
       items.push({
         accountKey: account.key,
@@ -110,7 +151,7 @@ async function buildBriefingItems({ triageByAccount = null } = {}) {
         category: notification.triage?.category ?? 'untriaged',
         summary:
           notification.triage?.cleanSummary ??
-          String(notification.rawText || '').slice(0, 160),
+          String(notification.rawText || '').slice(0, 200),
         urgencyScore: notification.triage?.urgencyScore ?? null,
         timestamp: notification.timestamp,
       });
@@ -124,57 +165,54 @@ async function buildBriefingItems({ triageByAccount = null } = {}) {
   return { accounts, items };
 }
 
-function buildFallbackBriefing(items) {
-  const actionRequired = items.filter((item) => item.category === 'action_required');
-  const quickWins = items.filter(
-    (item) => item.category === 'fyi' || item.category === 'ignore',
-  );
-  const appRelated = items.filter((item) =>
-    /servicelog|dealshield|alpharounds|beta|tester|play console|google play/i.test(
-      `${item.subject} ${item.summary} ${item.sender}`,
-    ),
-  );
+function buildQuietBriefing({ accountKey = null } = {}) {
+  const generatedAt = new Date().toISOString();
 
-  const priorityLines =
-    actionRequired.length > 0
-      ? actionRequired
-          .slice(0, 5)
-          .map(
-            (item) =>
-              `- **${item.subject}** from ${item.sender} (${item.accountLabel})`,
-          )
-          .join('\n')
-      : '- No triaged action items yet — run **Process Feed** to classify today\'s mail.';
-
-  const appLines =
-    appRelated.length > 0
-      ? appRelated
-          .map(
-            (item) =>
-              `- ${item.subject} — ${item.summary} (${item.accountLabel})`,
-          )
-          .join('\n')
-      : '- No tester or app feedback emails today.';
-
-  const quickWinLines =
-    quickWins.length > 0
-      ? quickWins
-          .slice(0, 6)
-          .map((item) => `- ${item.subject} (${item.category}, ${item.accountLabel})`)
-          .join('\n')
-      : '- Process your inbox to surface clearable items.';
-
-  return `## Top Priorities
-${priorityLines}
-
-## Testers & App Feedback
-${appLines}
-
-## Quick Wins
-${quickWinLines}`;
+  return {
+    success: true,
+    quiet: true,
+    message: 'System quiet over the last 24 hours.',
+    generatedAt,
+    briefingDate: generatedAt.slice(0, 10),
+    markdown: QUIET_BRIEFING_MARKDOWN,
+    summaryText: QUIET_BRIEFING_MARKDOWN,
+    urgencyLevel: 'low',
+    mode: 'quiet',
+    warning: null,
+    stats: buildBriefingStats([], accountKey ? 1 : listAccounts().length),
+    accountKeys: accountKey ? [accountKey] : listAccountKeys(),
+    accountKey: accountKey || 'all',
+  };
 }
 
-async function callBriefingLlm({ items, knowledgeBase }) {
+function formatStoredBriefing(stored) {
+  return {
+    success: true,
+    quiet: stored.signalCount === 0,
+    message: stored.signalCount === 0 ? 'System quiet over the last 24 hours.' : null,
+    id: stored.id,
+    generatedAt: stored.createdAt,
+    briefingDate: String(stored.createdAt || '').slice(0, 10),
+    markdown: stored.summaryText,
+    summaryText: stored.summaryText,
+    urgencyLevel: stored.urgencyLevel,
+    mode: stored.mode,
+    warning: null,
+    stats: {
+      signalCount: stored.signalCount,
+      totalToday: stored.signalCount,
+      actionRequired: 0,
+      fyi: 0,
+      ignore: 0,
+      untriaged: 0,
+      accountCount: 0,
+    },
+    accountKey: stored.accountKey,
+    accountKeys: stored.accountKey === 'all' ? listAccountKeys() : [stored.accountKey],
+  };
+}
+
+async function callExecutiveBriefingLlm({ items, knowledgeBase }) {
   const { apiKey, apiUrl, model } = getOpenAiConfig();
 
   if (isPlaceholderApiKey(apiKey)) {
@@ -186,9 +224,9 @@ async function callBriefingLlm({ items, knowledgeBase }) {
   }
 
   const userPayload = {
-    briefingDate: new Date().toISOString().slice(0, 10),
-    emailCount: items.length,
-    emails: items,
+    windowHours: BRIEFING_WINDOW_HOURS,
+    signalCount: items.length,
+    signals: items,
   };
 
   const controller = new AbortController();
@@ -203,15 +241,15 @@ async function callBriefingLlm({ items, knowledgeBase }) {
       },
       body: JSON.stringify({
         model,
-        temperature: 0.35,
+        temperature: 0.3,
         messages: [
           {
             role: 'system',
-            content: `${BRIEFING_SYSTEM_PROMPT}\n\nJerome's persona & context:\n"""\n${knowledgeBase}\n"""`,
+            content: `${EXECUTIVE_BRIEFING_SYSTEM_PROMPT}\n\nOperational context:\n"""\n${knowledgeBase}\n"""`,
           },
           {
             role: 'user',
-            content: `Generate today's Smart Morning Briefing from this combined inbox data:\n\n${JSON.stringify(userPayload, null, 2)}`,
+            content: `Generate the executive intelligence brief from these last-24-hour signals:\n\n${JSON.stringify(userPayload, null, 2)}`,
           },
         ],
       }),
@@ -247,33 +285,146 @@ async function callBriefingLlm({ items, knowledgeBase }) {
   }
 }
 
-async function generateDailyBriefing({ triageByAccount = null, knowledgeBase = '' } = {}) {
-  const { accounts, items } = await buildBriefingItems({ triageByAccount });
-  const llmResult = await callBriefingLlm({ items, knowledgeBase });
+function buildFallbackBriefing(items) {
+  if (items.length === 0) {
+    return QUIET_BRIEFING_MARKDOWN;
+  }
 
-  const stats = {
-    totalToday: items.length,
-    actionRequired: items.filter((item) => item.category === 'action_required')
-      .length,
-    fyi: items.filter((item) => item.category === 'fyi').length,
-    ignore: items.filter((item) => item.category === 'ignore').length,
-    untriaged: items.filter((item) => item.category === 'untriaged').length,
-    accountCount: accounts.length,
-  };
+  const actionRequired = items.filter((item) => item.category === 'action_required');
+  const routine = items.filter((item) => item.category !== 'action_required');
 
-  return {
-    generatedAt: new Date().toISOString(),
-    briefingDate: new Date().toISOString().slice(0, 10),
+  const sitrep =
+    actionRequired.length > 0
+      ? `- ${actionRequired.length} priority signal(s) require attention in the last 24 hours.\n- ${items.length} total inbound items were captured across monitored inboxes.`
+      : `- ${items.length} inbound signal(s) arrived in the last 24 hours with no critical escalations.\n- Inbox activity is manageable with routine follow-up only.`;
+
+  const priorityLines =
+    actionRequired.length > 0
+      ? actionRequired
+          .slice(0, 5)
+          .map(
+            (item) =>
+              `- **[High]** ${item.subject} — ${item.sender} (${item.accountLabel})`,
+          )
+          .join('\n')
+      : '- **[Routine]** No high-priority action items detected.';
+
+  const routineLines =
+    routine.length > 0
+      ? routine
+          .slice(0, 4)
+          .map(
+            (item) =>
+              `- **[Routine]** ${item.subject} (${item.category}, ${item.accountLabel})`,
+          )
+          .join('\n')
+      : '- **[Routine]** No additional maintenance items.';
+
+  const tableRows = items
+    .slice(0, 8)
+    .map((item) => {
+      const critical =
+        item.category === 'action_required'
+          ? item.subject
+          : 'None';
+      const noise =
+        item.category === 'ignore' || item.category === 'fyi' ? 'Low signal' : 'Active';
+      return `| ${item.accountLabel} | ${critical} | ${noise} |`;
+    })
+    .join('\n');
+
+  return `### ⚡ SITREP (Situation Report)
+${sitrep}
+
+### 🎯 Action Items & Priorities
+${priorityLines}
+${routineLines}
+
+### 🔍 Signal Filtering
+| Source | Critical Alert | Noise Status |
+| --- | --- | --- |
+${tableRows}`;
+}
+
+async function generateExecutiveBrief({
+  accountKey = null,
+  triageByAccount = null,
+  knowledgeBase = '',
+  persist = true,
+} = {}) {
+  const { accounts, items } = await buildBriefingItemsLast24Hours({
+    accountKey,
+    triageByAccount,
+  });
+
+  if (items.length === 0) {
+    const quiet = buildQuietBriefing({ accountKey });
+    if (persist) {
+      const stored = await appendExecutiveBrief({
+        accountKey: accountKey || 'all',
+        summaryText: quiet.markdown,
+        urgencyLevel: quiet.urgencyLevel,
+        signalCount: 0,
+        mode: quiet.mode,
+      });
+      quiet.id = stored.id;
+    }
+    return quiet;
+  }
+
+  const llmResult = await callExecutiveBriefingLlm({ items, knowledgeBase });
+  const urgencyLevel = inferUrgencyLevel(items);
+  const stats = buildBriefingStats(items, accounts.length);
+  const generatedAt = new Date().toISOString();
+  const scopeKey = accountKey || 'all';
+
+  const briefing = {
+    success: true,
+    quiet: false,
+    message: null,
+    generatedAt,
+    briefingDate: generatedAt.slice(0, 10),
     markdown: llmResult.markdown,
+    summaryText: llmResult.markdown,
+    urgencyLevel,
     mode: llmResult.mode,
     warning: llmResult.warning ?? null,
     stats,
-    accountKeys: listAccountKeys(),
+    accountKeys: accountKey ? [accountKey] : listAccountKeys(),
+    accountKey: scopeKey,
   };
+
+  if (persist) {
+    const stored = await appendExecutiveBrief({
+      accountKey: scopeKey,
+      summaryText: briefing.markdown,
+      urgencyLevel: briefing.urgencyLevel,
+      signalCount: items.length,
+      mode: briefing.mode,
+    });
+    briefing.id = stored.id;
+  }
+
+  return briefing;
+}
+
+/** @deprecated Use generateExecutiveBrief — kept for legacy callers. */
+async function generateDailyBriefing(options = {}) {
+  return generateExecutiveBrief(options);
+}
+
+async function buildBriefingItems(options = {}) {
+  return buildBriefingItemsLast24Hours(options);
 }
 
 module.exports = {
+  BRIEFING_WINDOW_HOURS,
+  generateExecutiveBrief,
   generateDailyBriefing,
   buildBriefingItems,
+  buildBriefingItemsLast24Hours,
   buildFallbackBriefing,
+  buildQuietBriefing,
+  formatStoredBriefing,
+  inferUrgencyLevel,
 };

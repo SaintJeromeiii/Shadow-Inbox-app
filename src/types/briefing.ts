@@ -1,4 +1,5 @@
 export interface BriefingStats {
+  signalCount?: number;
   totalToday: number;
   actionRequired: number;
   fyi: number;
@@ -8,11 +9,18 @@ export interface BriefingStats {
 }
 
 export interface DailyBriefing {
+  success?: boolean;
+  quiet?: boolean;
+  message?: string | null;
+  id?: string;
   generatedAt: string;
   briefingDate: string;
   markdown: string;
-  mode: 'live' | 'fallback';
+  summaryText?: string;
+  urgencyLevel?: 'low' | 'routine' | 'elevated' | 'critical';
+  mode: 'live' | 'fallback' | 'quiet';
   warning: string | null;
   stats: BriefingStats;
   accountKeys: string[];
+  accountKey?: string;
 }

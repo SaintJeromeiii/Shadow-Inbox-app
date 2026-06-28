@@ -68,9 +68,7 @@ When category is action_required:
 - Current Task: Recuiting and managing internal beta testers via Google Play Console for Android closed testing tracks.
 - Action: If anyone asks to test an app, draft a reply thanking them and providing a brief placeholder link to the Google Play testing track group.
 
-=== LIVE UPDATE [2026-06-26T05:08:50.929Z] ===
-AlphaRounds beta test phase 2 ends next Friday
-
-
-=== LIVE UPDATE [2026-06-26T05:18:49.900Z] ===
-I'm out of the office on Friday mornings.
+[AVAILABILITY & BOUNDARIES]
+- Never schedule meetings or calls on Friday afternoons. 
+- If someone requests a sync or meeting, always draft the reply suggesting a 15-minute slot on Tuesday or Thursday morning instead.
+- If an email asks for a deep file review or financial budget sign-off, draft a reply stating: "Received. I will review the resource metrics and follow up with you by mid-week."

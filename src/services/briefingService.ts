@@ -2,9 +2,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { AccountKey } from '../types/account';
 import type { DailyBriefing } from '../types/briefing';
 import type { TriagedNotification } from '../types/notification';
-import { getRelayUrl } from './emailService';
+import { getActiveAccountKey, getRelayUrl } from './emailService';
 
 const REQUEST_TIMEOUT_MS = 50_000;
+const LATEST_TIMEOUT_MS = 12_000;
 const DISMISS_KEY = '@shadow_inbox/briefing_dismissed_date';
 
 function todayKey(): string {
@@ -31,15 +32,55 @@ async function fetchWithTimeout(
   }
 }
 
-export async function fetchDailyBriefing(
+function isSameBriefingDay(generatedAt: string): boolean {
+  return String(generatedAt || '').slice(0, 10) === todayKey();
+}
+
+export async function fetchLatestBriefing(
+  accountKey: AccountKey = getActiveAccountKey(),
+): Promise<DailyBriefing | null> {
+  const params = new URLSearchParams({ accountKey });
+  const response = await fetchWithTimeout(
+    `${getRelayUrl()}/api/briefing/latest?${params.toString()}`,
+    {
+      method: 'GET',
+      headers: { 'X-Account-Key': accountKey },
+    },
+    LATEST_TIMEOUT_MS,
+  );
+
+  if (response.status === 404) {
+    return null;
+  }
+
+  if (!response.ok) {
+    let errorMessage = `Latest briefing request failed (${response.status})`;
+    try {
+      const body = (await response.json()) as { error?: string };
+      if (body.error) errorMessage = body.error;
+    } catch {
+      const text = await response.text();
+      if (text) errorMessage = text;
+    }
+    throw new Error(errorMessage);
+  }
+
+  return (await response.json()) as DailyBriefing;
+}
+
+export async function generateDailyBriefing(
   triageByAccount: Record<AccountKey, TriagedNotification[]>,
+  accountKey: AccountKey = getActiveAccountKey(),
 ): Promise<DailyBriefing> {
   const response = await fetchWithTimeout(
-    `${getRelayUrl()}/api/briefing`,
+    `${getRelayUrl()}/api/briefing/generate`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ triageByAccount }),
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Account-Key': accountKey,
+      },
+      body: JSON.stringify({ triageByAccount, accountKey }),
     },
     REQUEST_TIMEOUT_MS,
   );
@@ -57,6 +98,22 @@ export async function fetchDailyBriefing(
   }
 
   return (await response.json()) as DailyBriefing;
+}
+
+export async function fetchDailyBriefing(
+  triageByAccount: Record<AccountKey, TriagedNotification[]>,
+  accountKey: AccountKey = getActiveAccountKey(),
+): Promise<DailyBriefing> {
+  try {
+    const latest = await fetchLatestBriefing(accountKey);
+    if (latest && isSameBriefingDay(latest.generatedAt)) {
+      return latest;
+    }
+  } catch (error) {
+    console.warn('[Shadow Inbox] Latest briefing fetch failed, generating fresh:', error);
+  }
+
+  return generateDailyBriefing(triageByAccount, accountKey);
 }
 
 export async function isBriefingDismissedForToday(): Promise<boolean> {

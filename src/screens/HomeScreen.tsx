@@ -1008,7 +1008,11 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <Text style={styles.headerTitle}>Shadow Inbox</Text>
+          <View style={styles.headerTitleWrap}>
+            <Text style={styles.headerTitle} numberOfLines={1} adjustsFontSizeToFit>
+              Shadow Inbox
+            </Text>
+          </View>
           <View style={styles.headerMeta}>
             <View style={styles.headerBadgeRow}>
               <View
@@ -1050,6 +1054,7 @@ export default function HomeScreen() {
         <View style={styles.headerActions}>
           <VoiceNoteButton
             accountKey={activeAccount}
+            compact
             onIngested={() => {
               void loadTasks();
               void loadFinances();
@@ -1057,29 +1062,30 @@ export default function HomeScreen() {
           />
           <Pressable
             style={({ pressed }) => [
-              styles.knowledgePill,
-              pressed && styles.knowledgePillPressed,
+              styles.headerUtilityPill,
+              pressed && styles.headerUtilityPillPressed,
             ]}
             onPress={() => setAutoPilotVisible(true)}
             accessibilityLabel="Open auto-pilot rules"
           >
-            <Text style={styles.knowledgePillEmoji}>🤖</Text>
+            <Text style={styles.headerUtilityEmoji}>🤖</Text>
           </Pressable>
           <Pressable
             style={({ pressed }) => [
-              styles.knowledgePill,
-              pressed && styles.knowledgePillPressed,
+              styles.headerUtilityPill,
+              pressed && styles.headerUtilityPillPressed,
             ]}
             onPress={() => setKnowledgeVisible(true)}
             accessibilityLabel="Open core knowledge base"
           >
-            <Text style={styles.knowledgePillEmoji}>🧠</Text>
+            <Text style={styles.headerUtilityEmoji}>🧠</Text>
           </Pressable>
           <Pressable
             style={({ pressed }) => [
+              styles.headerUtilityPill,
               styles.accountPill,
               { borderColor: activeProfile.accentColor },
-              pressed && styles.accountPillPressed,
+              pressed && styles.headerUtilityPillPressed,
             ]}
             onPress={() => setAccountSheetVisible(true)}
             accessibilityLabel="Switch inbox account"
@@ -1093,7 +1099,11 @@ export default function HomeScreen() {
               <Text style={styles.accountAvatarText}>{activeProfile.initials}</Text>
             </View>
           </Pressable>
-          <Pressable
+        </View>
+      </View>
+
+      <View style={styles.headerProcessRow}>
+        <Pressable
           style={({ pressed }) => [
             styles.processButton,
             (processing || unreadCount === 0) && styles.processButtonDisabled,
@@ -1111,7 +1121,6 @@ export default function HomeScreen() {
             <Text style={styles.processButtonText}>Process Feed</Text>
           )}
         </Pressable>
-        </View>
       </View>
 
       <AccountSwitcherSheet
@@ -1225,52 +1234,56 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     paddingHorizontal: 20,
     paddingTop: 8,
-    paddingBottom: 20,
+    paddingBottom: 8,
   },
   headerLeft: {
     flex: 1,
-    marginRight: 8,
+    flexShrink: 1,
+    minWidth: 0,
+    marginRight: 12,
+  },
+  headerTitleWrap: {
+    flexShrink: 1,
+    minWidth: 0,
   },
   headerActions: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
+    alignItems: 'center',
+    gap: 12,
+    flexShrink: 0,
   },
-  knowledgePill: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+  headerProcessRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+  },
+  headerUtilityPill: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#161922',
     borderWidth: 1,
     borderColor: 'rgba(167, 139, 250, 0.35)',
   },
-  knowledgePillPressed: {
+  headerUtilityPillPressed: {
     opacity: 0.85,
   },
-  knowledgePillEmoji: {
-    fontSize: 20,
+  headerUtilityEmoji: {
+    fontSize: 18,
   },
   accountPill: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
     borderWidth: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#161922',
-  },
-  accountPillPressed: {
-    opacity: 0.85,
   },
   accountAvatar: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1343,9 +1356,9 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     color: '#FFFFFF',
-    fontSize: 28,
-    fontWeight: '800',
-    letterSpacing: -0.5,
+    fontSize: 22,
+    fontWeight: '600',
+    letterSpacing: -0.3,
   },
   headerSubtitle: {
     color: '#6B7288',
@@ -1354,10 +1367,9 @@ const styles = StyleSheet.create({
   },
   processButton: {
     backgroundColor: '#5B8DEF',
-    paddingHorizontal: 18,
-    paddingVertical: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     borderRadius: 10,
-    minWidth: 120,
     alignItems: 'center',
   },
   processButtonDisabled: {
