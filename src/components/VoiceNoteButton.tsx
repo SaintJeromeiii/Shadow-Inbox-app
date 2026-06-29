@@ -12,6 +12,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useVoiceNoteRecording } from '../hooks/useVoiceNoteRecording';
 import { ingestVoiceNote } from '../services/voiceNoteService';
 import type { AccountKey } from '../types/account';
+import { ArcadeJoystickIcon } from './ArcadeIcons';
+import { arcadeColors } from '../theme/arcadeTheme';
+import { useRetroFeedbackOptional } from '../context/RetroFeedbackContext';
 
 const HOLD_DELAY_MS = 220;
 
@@ -34,6 +37,7 @@ export default function VoiceNoteButton({
     stopRecording,
   } = useVoiceNoteRecording();
   const [uploading, setUploading] = useState(false);
+  const retroFeedback = useRetroFeedbackOptional();
 
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const holdSessionRef = useRef(false);
@@ -60,6 +64,7 @@ export default function VoiceNoteButton({
 
       const message = result.message || 'Voice note saved.';
       onIngested?.(message);
+      retroFeedback?.showActionComplete('VOICE LOGGED!');
       Alert.alert('Voice note', message);
     },
     [accountKey, onIngested],
@@ -178,10 +183,9 @@ export default function VoiceNoteButton({
         <ActivityIndicator size="small" color="#F8FAFC" />
       ) : (
         <Animated.View style={{ transform: [{ scale: isRecording ? pulseAnim : 1 }] }}>
-          <Ionicons
-            name={isRecording ? 'mic' : 'mic-outline'}
+          <ArcadeJoystickIcon
             size={compact ? 18 : 20}
-            color={isRecording ? '#FCA5A5' : '#E2E8F0'}
+            color={isRecording ? arcadeColors.neonPink : arcadeColors.neonCyan}
           />
         </Animated.View>
       )}
@@ -198,21 +202,21 @@ const styles = StyleSheet.create({
   pill: {
     width: 44,
     height: 44,
-    borderRadius: 22,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#161922',
-    borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.35)',
+    backgroundColor: arcadeColors.bgPanel,
+    borderWidth: 2,
+    borderColor: arcadeColors.borderCyan,
   },
   pillCompact: {
     width: 40,
     height: 40,
-    borderRadius: 20,
+    borderRadius: 8,
   },
   pillRecording: {
-    borderColor: 'rgba(248, 113, 113, 0.65)',
-    backgroundColor: '#1F1418',
+    borderColor: arcadeColors.borderPink,
+    backgroundColor: arcadeColors.bgPanelElevated,
   },
   pillBusy: {
     opacity: 0.75,

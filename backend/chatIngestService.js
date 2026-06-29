@@ -28,8 +28,9 @@ async function ingestPlatformMessages(accountKey, incomingNotifications = []) {
   await writeNotifications(accountKey, merged.slice(0, MAX_FEED_ITEMS));
 
   return {
-    ingested: fresh.length,
+    ingested: enriched.length,
     total: Math.min(merged.length, MAX_FEED_ITEMS),
+    blocked: fresh.length - enriched.length,
   };
 }
 

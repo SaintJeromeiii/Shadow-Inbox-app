@@ -213,8 +213,10 @@ async function sendExpoPushMessages(messages) {
   };
 }
 
-async function maybeSendPriorityPush(accountKey, notification) {
-  let alertKind = detectPriorityAlertKind(notification);
+async function maybeSendPriorityPush(accountKey, notification, options = {}) {
+  let alertKind = options.force
+    ? 'high_priority'
+    : detectPriorityAlertKind(notification);
 
   if (!alertKind) {
     alertKind = await detectRuleTriggeredKind(notification);

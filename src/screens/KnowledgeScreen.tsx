@@ -21,13 +21,23 @@ import {
   updateKnowledgeBase,
   type KnowledgeMemory,
 } from '../services/knowledgeAdminService';
+import { ArcadeCassetteIcon, ArcadeHamburgerIcon } from '../components/ArcadeIcons';
+import { useRetroFeedback } from '../context/RetroFeedbackContext';
+import { arcadeColors, arcadeFonts } from '../theme/arcadeTheme';
 
 interface KnowledgeScreenProps {
   visible: boolean;
   onClose: () => void;
+  variant?: 'modal' | 'screen';
+  onOpenDrawer?: () => void;
 }
 
-export default function KnowledgeScreen({ visible, onClose }: KnowledgeScreenProps) {
+export default function KnowledgeScreen({
+  visible,
+  onClose,
+  variant = 'modal',
+  onOpenDrawer,
+}: KnowledgeScreenProps) {
   const [snippet, setSnippet] = useState('');
   const [memories, setMemories] = useState<KnowledgeMemory[]>([]);
   const [loading, setLoading] = useState(false);
@@ -36,6 +46,7 @@ export default function KnowledgeScreen({ visible, onClose }: KnowledgeScreenPro
   const [successVisible, setSuccessVisible] = useState(false);
   const successScale = useRef(new Animated.Value(0.8)).current;
   const successOpacity = useRef(new Animated.Value(0)).current;
+  const { showActionComplete } = useRetroFeedback();
 
   const loadMemories = async () => {
     setLoading(true);
@@ -61,6 +72,7 @@ export default function KnowledgeScreen({ visible, onClose }: KnowledgeScreenPro
 
   const playSuccessAnimation = () => {
     setSuccessVisible(true);
+    showActionComplete('MEMORY UPDATED!');
     successScale.setValue(0.8);
     successOpacity.setValue(0);
 
@@ -111,30 +123,29 @@ export default function KnowledgeScreen({ visible, onClose }: KnowledgeScreenPro
     }
   };
 
-  return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      presentationStyle="pageSheet"
-      onRequestClose={onClose}
-    >
+  const content = (
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <KeyboardAvoidingView
           style={styles.flex}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
           <View style={styles.header}>
+            {variant === 'screen' && onOpenDrawer ? (
+              <Pressable style={styles.menuButton} onPress={onOpenDrawer}>
+                <ArcadeHamburgerIcon size={18} color={arcadeColors.neonCyan} />
+              </Pressable>
+            ) : null}
             <View style={styles.headerCopy}>
-              <Text style={styles.emoji}>🧠</Text>
+              <ArcadeCassetteIcon size={22} color={arcadeColors.neonCyan} />
               <View>
-                <Text style={styles.title}>Core Knowledge Base</Text>
+                <Text style={styles.title}>DATA CORE</Text>
                 <Text style={styles.subtitle}>
                   Teach Shadow Inbox live — no restart required.
                 </Text>
               </View>
             </View>
             <Pressable onPress={onClose} hitSlop={12} style={styles.closeButton}>
-              <Ionicons name="close" size={22} color="#9AA3B8" />
+              <Ionicons name="close" size={22} color={arcadeColors.neonCyan} />
             </Pressable>
           </View>
 
@@ -217,6 +228,21 @@ export default function KnowledgeScreen({ visible, onClose }: KnowledgeScreenPro
           ) : null}
         </KeyboardAvoidingView>
       </SafeAreaView>
+  );
+
+  if (variant === 'screen') {
+    if (!visible) return null;
+    return content;
+  }
+
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={onClose}
+    >
+      {content}
     </Modal>
   );
 }
@@ -224,25 +250,36 @@ export default function KnowledgeScreen({ visible, onClose }: KnowledgeScreenPro
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0D0F14',
+    backgroundColor: arcadeColors.bgDeep,
   },
   flex: {
     flex: 1,
   },
   header: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
     paddingTop: 8,
     paddingBottom: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#232A38',
+    gap: 10,
+  },
+  menuButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: arcadeColors.bgPanel,
+    borderWidth: 2,
+    borderColor: arcadeColors.borderCyan,
   },
   headerCopy: {
+    flex: 1,
     flexDirection: 'row',
     gap: 12,
-    flex: 1,
     paddingRight: 12,
   },
   emoji: {
@@ -250,10 +287,10 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   title: {
-    color: '#F4F6FB',
-    fontSize: 22,
-    fontWeight: '800',
-    letterSpacing: -0.3,
+    color: arcadeColors.neonCyan,
+    fontFamily: arcadeFonts.pixel,
+    fontSize: 10,
+    letterSpacing: 0.5,
   },
   subtitle: {
     color: '#7D89A8',

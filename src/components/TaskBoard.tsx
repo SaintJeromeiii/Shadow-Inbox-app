@@ -18,6 +18,11 @@ import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import type { ExtractedTask } from '../types/task';
 import { groupTasksByProject } from '../services/taskService';
+import {
+  arcadeColors,
+  arcadePanel,
+  arcadeTypography,
+} from '../theme/arcadeTheme';
 
 if (
   Platform.OS === 'android' &&
@@ -42,16 +47,16 @@ interface TaskBoardProps {
 }
 
 const PROJECT_COLORS: Record<string, string> = {
-  AlphaRounds: '#C084FC',
-  DealShield: '#6EE7A0',
-  ServiceLog: '#67E8F9',
-  'App Feedback': '#FFB347',
-  Work: '#F472B6',
-  General: '#5B8DEF',
+  AlphaRounds: arcadeColors.neonPurple,
+  DealShield: arcadeColors.neonGreen,
+  ServiceLog: arcadeColors.neonCyan,
+  'App Feedback': arcadeColors.neonYellow,
+  Work: arcadeColors.neonPink,
+  General: arcadeColors.neonCyan,
 };
 
 function projectColor(project: string): string {
-  return PROJECT_COLORS[project] ?? '#8B93A8';
+  return PROJECT_COLORS[project] ?? arcadeColors.textMuted;
 }
 
 function TaskCard({
@@ -91,7 +96,7 @@ function TaskCard({
           accessibilityState={{ checked: task.completed }}
         >
           {task.completed ? (
-            <Ionicons name="checkmark" size={14} color="#0D0F14" />
+            <Ionicons name="checkmark" size={14} color={arcadeColors.bgDeep} />
           ) : null}
         </Pressable>
 
@@ -111,7 +116,7 @@ function TaskCard({
           <Ionicons
             name={expanded ? 'chevron-up' : 'chevron-down'}
             size={16}
-            color="#6B7288"
+            color={arcadeColors.textMuted}
           />
         </Pressable>
       </View>
@@ -217,11 +222,11 @@ export default function TaskBoard({
           accessibilityState={{ expanded }}
         >
           <View style={styles.headerCopy}>
-            <Text style={styles.kicker}>Smart Task Board</Text>
-            <Text style={styles.title}>{summaryLabel}</Text>
+            <Text style={styles.kicker}>QUEST LOG</Text>
+            <Text style={styles.title}>{summaryLabel.toUpperCase()}</Text>
           </View>
           <View style={styles.headerActions}>
-            {loading ? <ActivityIndicator color="#8EB5FF" size="small" /> : null}
+            {loading ? <ActivityIndicator color={arcadeColors.neonPurple} size="small" /> : null}
             {!loading && activeCount > 0 ? (
               <View style={styles.countPill}>
                 <Text style={styles.countPillText}>{activeCount}</Text>
@@ -230,7 +235,7 @@ export default function TaskBoard({
             <Ionicons
               name={expanded ? 'chevron-up' : 'chevron-down'}
               size={18}
-              color="#9EB8F0"
+              color={arcadeColors.neonCyan}
             />
           </View>
         </Pressable>
@@ -314,20 +319,16 @@ const styles = StyleSheet.create({
     left: 24,
     right: 24,
     height: 48,
-    borderRadius: 24,
-    backgroundColor: 'rgba(91, 141, 239, 0.16)',
+    borderRadius: 8,
+    backgroundColor: 'rgba(179, 102, 255, 0.1)',
   },
   glowCollapsed: {
     height: 32,
     opacity: 0.7,
   },
   board: {
-    backgroundColor: '#121722',
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#2A3550',
+    ...arcadePanel('pink'),
     padding: 16,
-    overflow: 'hidden',
   },
   boardCollapsed: {
     paddingBottom: 14,
@@ -340,7 +341,7 @@ const styles = StyleSheet.create({
   },
   headerCopy: {
     flex: 1,
-    gap: 2,
+    gap: 4,
   },
   headerActions: {
     flexDirection: 'row',
@@ -350,31 +351,26 @@ const styles = StyleSheet.create({
   countPill: {
     minWidth: 24,
     height: 24,
-    borderRadius: 12,
+    borderRadius: 4,
     paddingHorizontal: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(91, 141, 239, 0.16)',
+    backgroundColor: arcadeColors.bgPanelElevated,
     borderWidth: 1,
-    borderColor: 'rgba(91, 141, 239, 0.35)',
+    borderColor: arcadeColors.borderPink,
   },
   countPillText: {
-    color: '#9EB8F0',
-    fontSize: 12,
-    fontWeight: '800',
+    ...arcadeTypography.retroMeta,
+    color: arcadeColors.neonPink,
+    fontWeight: '700',
   },
   kicker: {
-    color: '#7D89A8',
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
-    marginBottom: 4,
+    ...arcadeTypography.sectionLabel,
   },
   title: {
-    color: '#F4F6FB',
-    fontSize: 16,
-    fontWeight: '700',
+    ...arcadeTypography.pixelSubtitle,
+    color: arcadeColors.neonCyan,
+    fontSize: 8,
   },
   groupPager: {
     gap: 0,
@@ -393,35 +389,33 @@ const styles = StyleSheet.create({
   projectDot: {
     width: 8,
     height: 8,
-    borderRadius: 4,
+    borderRadius: 2,
   },
   groupTitle: {
-    color: '#E8ECF4',
+    ...arcadeTypography.retroBodyBright,
     fontSize: 14,
-    fontWeight: '700',
     flex: 1,
   },
   groupCountBadge: {
     minWidth: 22,
     height: 22,
-    borderRadius: 11,
-    backgroundColor: '#1A2030',
+    borderRadius: 4,
+    backgroundColor: arcadeColors.bgPanelElevated,
     borderWidth: 1,
-    borderColor: '#2E3548',
+    borderColor: arcadeColors.borderMuted,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 6,
   },
   groupCountText: {
-    color: '#9AA3B8',
-    fontSize: 11,
+    ...arcadeTypography.retroMeta,
     fontWeight: '700',
   },
   taskCard: {
-    backgroundColor: '#0D1018',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#232A38',
+    backgroundColor: arcadeColors.bgPanelElevated,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: arcadeColors.borderMuted,
     padding: 12,
     marginBottom: 10,
   },
@@ -436,7 +430,7 @@ const styles = StyleSheet.create({
   checkbox: {
     width: 22,
     height: 22,
-    borderRadius: 7,
+    borderRadius: 4,
     borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
@@ -447,47 +441,40 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   taskTitle: {
-    color: '#F4F6FB',
+    ...arcadeTypography.retroBodyBright,
     fontSize: 14,
     lineHeight: 20,
-    fontWeight: '600',
   },
   taskTitleCompleted: {
     textDecorationLine: 'line-through',
-    color: '#8B93A8',
+    color: arcadeColors.textDim,
   },
   taskDue: {
-    color: '#FFB347',
-    fontSize: 11,
+    ...arcadeTypography.retroMeta,
+    color: arcadeColors.neonYellow,
     fontWeight: '600',
   },
   expandedBlock: {
     marginTop: 12,
     paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: '#232A38',
+    borderTopColor: arcadeColors.borderMuted,
     gap: 6,
   },
   expandedLabel: {
-    color: '#6B7288',
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.7,
-    textTransform: 'uppercase',
+    ...arcadeTypography.sectionLabel,
+    color: arcadeColors.textDim,
   },
   expandedSubject: {
-    color: '#D0D5E0',
+    ...arcadeTypography.retroBodyBright,
     fontSize: 13,
-    fontWeight: '700',
   },
   expandedSummary: {
-    color: '#9AA3B8',
+    ...arcadeTypography.retroBody,
     fontSize: 13,
-    lineHeight: 19,
   },
   expandedSender: {
-    color: '#6B7288',
-    fontSize: 12,
+    ...arcadeTypography.retroMeta,
     marginBottom: 4,
   },
   jumpButton: {
@@ -496,17 +483,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    borderWidth: 1,
-    borderRadius: 10,
+    borderWidth: 2,
+    borderRadius: 4,
     paddingVertical: 9,
-    backgroundColor: 'rgba(255,255,255,0.02)',
+    backgroundColor: arcadeColors.bgPanel,
   },
   jumpButtonPressed: {
     opacity: 0.8,
   },
   jumpButtonText: {
-    fontSize: 12,
-    fontWeight: '700',
+    ...arcadeTypography.sectionLabel,
+    fontSize: 7,
   },
   dotsRow: {
     flexDirection: 'row',
@@ -517,15 +504,14 @@ const styles = StyleSheet.create({
   dot: {
     width: 6,
     height: 6,
-    borderRadius: 3,
-    backgroundColor: '#2E3548',
+    borderRadius: 2,
+    backgroundColor: arcadeColors.borderMuted,
   },
   dotActive: {
     width: 18,
   },
   emptyText: {
-    color: '#6B7288',
-    fontSize: 13,
+    ...arcadeTypography.retroCaption,
     lineHeight: 19,
   },
 });

@@ -11,6 +11,11 @@ import {
 } from 'react-native';
 import type { FinanceSummary } from '../types/finance';
 import { formatUsd } from '../services/financeService';
+import {
+  arcadeColors,
+  arcadePanel,
+  arcadeTypography,
+} from '../theme/arcadeTheme';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const METRIC_PAGE_WIDTH = SCREEN_WIDTH - 64;
@@ -51,23 +56,23 @@ export default function FinanceRunwayStrip({
     return [
       {
         key: 'total',
-        label: 'Total Dev Cost',
+        label: 'TOTAL DEV COST',
         value: summary?.totalMonthToDate ?? 0,
-        accent: '#5B8DEF',
+        accent: arcadeColors.neonCyan,
         caption: 'Month-to-date operational spend',
       },
       {
         key: 'alpharounds',
-        label: 'AlphaRounds Overhead',
+        label: 'ALPHAROUNDS OH',
         value: byProject.AlphaRounds,
-        accent: '#C084FC',
+        accent: arcadeColors.neonPurple,
         caption: 'MTD run rate for AlphaRounds',
       },
       {
         key: 'dealshield',
-        label: 'DealShield Infrastructure',
+        label: 'DEALSHIELD INFRA',
         value: byProject.DealShield,
-        accent: '#6EE7A0',
+        accent: arcadeColors.neonGreen,
         caption: 'MTD infrastructure for DealShield',
       },
     ];
@@ -85,8 +90,11 @@ export default function FinanceRunwayStrip({
       <View style={styles.glow} />
       <View style={styles.panel}>
         <View style={styles.headerRow}>
-          <Text style={styles.title}>📊 Project Runway & Finances</Text>
-          {loading ? <ActivityIndicator color="#8EB5FF" size="small" /> : null}
+          <View style={styles.headerCopy}>
+            <Text style={styles.title}>OPERATION WAR CHEST</Text>
+            <Text style={styles.subtitle}>FIELD EXPENSES // CASE FUNDS</Text>
+          </View>
+          {loading ? <ActivityIndicator color={arcadeColors.neonGreen} size="small" /> : null}
         </View>
 
         <ScrollView
@@ -127,7 +135,7 @@ export default function FinanceRunwayStrip({
         ) : null}
 
         <View style={styles.feedHeader}>
-          <Text style={styles.feedTitle}>Recent Transactions</Text>
+          <Text style={styles.feedTitle}>RECENT TXNS</Text>
           <Text style={styles.feedMeta}>
             {summary?.monthKey ?? 'This month'} · {summary?.transactionCount ?? 0} logged
           </Text>
@@ -139,7 +147,9 @@ export default function FinanceRunwayStrip({
               <View key={tx.id} style={styles.feedRow}>
                 <View style={styles.feedCopy}>
                   <Text style={styles.feedLine} numberOfLines={1}>
-                    <Text style={styles.feedStrong}>{formatUsd(tx.amount)}</Text>
+                    <Text style={[styles.feedStrong, { color: arcadeColors.neonGreen }]}>
+                      {formatUsd(tx.amount)}
+                    </Text>
                     <Text style={styles.feedMuted}> · </Text>
                     <Text style={styles.feedStrong}>{tx.vendor}</Text>
                   </Text>
@@ -170,30 +180,30 @@ const styles = StyleSheet.create({
     left: 24,
     right: 24,
     height: 48,
-    borderRadius: 24,
-    backgroundColor: 'rgba(110, 231, 160, 0.12)',
+    borderRadius: 8,
+    backgroundColor: 'rgba(102, 255, 153, 0.1)',
   },
   panel: {
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: '#232A38',
-    backgroundColor: '#10131C',
+    ...arcadePanel('green'),
     paddingHorizontal: 16,
     paddingTop: 14,
     paddingBottom: 12,
-    overflow: 'hidden',
   },
   headerRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     marginBottom: 10,
   },
+  headerCopy: {
+    gap: 4,
+    flex: 1,
+  },
   title: {
-    color: '#E8ECF5',
-    fontSize: 15,
-    fontWeight: '700',
-    letterSpacing: 0.2,
+    ...arcadeTypography.pixelTitlePink,
+  },
+  subtitle: {
+    ...arcadeTypography.pixelSubtitle,
   },
   metricPager: {
     paddingBottom: 4,
@@ -203,27 +213,23 @@ const styles = StyleSheet.create({
     paddingRight: 8,
   },
   metricChip: {
-    borderRadius: 14,
-    borderWidth: 1,
-    backgroundColor: '#141824',
+    borderRadius: 4,
+    borderWidth: 2,
+    backgroundColor: arcadeColors.bgPanelElevated,
     paddingHorizontal: 14,
     paddingVertical: 12,
   },
   metricLabel: {
-    color: '#9AA3B8',
-    fontSize: 12,
-    fontWeight: '600',
-    marginBottom: 4,
+    ...arcadeTypography.sectionLabel,
+    color: arcadeColors.textMuted,
+    marginBottom: 6,
   },
   metricValue: {
-    fontSize: 28,
-    fontWeight: '800',
-    letterSpacing: -0.5,
-    marginBottom: 2,
+    ...arcadeTypography.retroValue,
+    marginBottom: 4,
   },
   metricCaption: {
-    color: '#6B7288',
-    fontSize: 11,
+    ...arcadeTypography.retroCaption,
   },
   dotsRow: {
     flexDirection: 'row',
@@ -235,8 +241,8 @@ const styles = StyleSheet.create({
   dot: {
     width: 6,
     height: 6,
-    borderRadius: 3,
-    backgroundColor: '#2A3142',
+    borderRadius: 2,
+    backgroundColor: arcadeColors.borderMuted,
   },
   dotActive: {
     width: 16,
@@ -246,52 +252,44 @@ const styles = StyleSheet.create({
     alignItems: 'baseline',
     justifyContent: 'space-between',
     marginBottom: 6,
-    paddingTop: 2,
+    paddingTop: 8,
     borderTopWidth: 1,
-    borderTopColor: '#1C2230',
+    borderTopColor: arcadeColors.borderMuted,
   },
   feedTitle: {
-    color: '#C7D0E0',
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 0.3,
-    textTransform: 'uppercase',
+    ...arcadeTypography.sectionLabel,
   },
   feedMeta: {
-    color: '#5C6478',
-    fontSize: 11,
+    ...arcadeTypography.retroMeta,
   },
   feedList: {
     gap: 6,
   },
   feedRow: {
     paddingVertical: 4,
+    borderLeftWidth: 2,
+    borderLeftColor: arcadeColors.borderMuted,
+    paddingLeft: 8,
   },
   feedCopy: {
     flex: 1,
   },
   feedLine: {
-    color: '#D7DEEA',
-    fontSize: 13,
-    lineHeight: 18,
+    ...arcadeTypography.retroBody,
   },
   feedStrong: {
-    color: '#F3F6FC',
-    fontWeight: '700',
+    ...arcadeTypography.retroBodyBright,
+    color: arcadeColors.neonCyan,
   },
   feedMuted: {
-    color: '#5C6478',
-    fontWeight: '400',
+    ...arcadeTypography.retroCaption,
   },
   feedSubline: {
-    color: '#6B7288',
-    fontSize: 11,
-    marginTop: 1,
+    ...arcadeTypography.retroMeta,
+    marginTop: 2,
   },
   emptyText: {
-    color: '#5C6478',
-    fontSize: 12,
-    lineHeight: 18,
+    ...arcadeTypography.retroCaption,
     paddingVertical: 4,
   },
 });

@@ -131,6 +131,36 @@ create index if not exists idx_executive_briefs_account_created
 create index if not exists idx_executive_briefs_urgency
   on public.executive_briefs (urgency_level, created_at desc);
 
+create table if not exists public.firewall_rules (
+  id text primary key,
+  user_id text not null default 'personal',
+  rule_type text not null,
+  match_value text not null,
+  action_effect text not null,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_firewall_rules_user_active
+  on public.firewall_rules (user_id, is_active, created_at desc);
+
+create index if not exists idx_firewall_rules_action
+  on public.firewall_rules (action_effect, created_at desc);
+
+create table if not exists public.user_progress (
+  account_key text not null,
+  character_id text not null default 'black_male',
+  total_deletions integer not null default 0,
+  updated_at timestamptz not null default now(),
+  primary key (account_key, character_id)
+);
+
+create index if not exists idx_user_progress_updated
+  on public.user_progress (updated_at desc);
+
+create index if not exists idx_user_progress_character
+  on public.user_progress (account_key, character_id, updated_at desc);
+
 -- Backend uses the service role key server-side. Disable RLS so inserts succeed.
 alter table public.notification_feed disable row level security;
 alter table public.finance_transactions disable row level security;
@@ -138,3 +168,5 @@ alter table public.auto_pilot_rules disable row level security;
 alter table public.expo_push_tokens disable row level security;
 alter table public.voice_notes disable row level security;
 alter table public.executive_briefs disable row level security;
+alter table public.firewall_rules disable row level security;
+alter table public.user_progress disable row level security;

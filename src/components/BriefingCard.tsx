@@ -9,6 +9,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import MarkdownBriefing from './MarkdownBriefing';
 import type { DailyBriefing } from '../types/briefing';
+import { arcadeColors, arcadeFonts, neonCyanText } from '../theme/arcadeTheme';
 
 interface BriefingCardProps {
   briefing: DailyBriefing | null;
@@ -41,19 +42,19 @@ export default function BriefingCard({
           accessibilityState={{ expanded }}
         >
           <View style={styles.headerLeft}>
-            <Text style={styles.emoji}>🌅</Text>
+            <Text style={styles.emoji}>▶</Text>
             <View style={styles.headerCopy}>
-              <Text style={styles.title}>Your Smart Morning Briefing</Text>
+              <Text style={styles.title}>CRIME BULLETIN</Text>
               {briefing ? (
                 <Text style={styles.meta}>
-                  {briefing.stats.totalToday} emails today ·{' '}
-                  {briefing.stats.actionRequired} priorities · updated{' '}
+                  {briefing.stats.totalToday} leads today ·{' '}
+                  {briefing.stats.actionRequired} open cases · updated{' '}
                   {formatGeneratedAt(briefing.generatedAt)}
-                  {briefing.mode === 'fallback' ? ' · local summary' : ''}
+                  {briefing.mode === 'fallback' ? ' · local dossier' : ''}
                 </Text>
               ) : (
                 <Text style={styles.meta}>
-                  {loading ? 'Generating executive summary…' : 'Pull to refresh'}
+                  {loading ? 'Compiling crime bulletin…' : 'Pull to refresh'}
                 </Text>
               )}
             </View>
@@ -61,7 +62,7 @@ export default function BriefingCard({
           <Ionicons
             name={expanded ? 'chevron-up' : 'chevron-down'}
             size={18}
-            color="#9EB8F0"
+            color={arcadeColors.neonCyan}
           />
         </Pressable>
 
@@ -69,8 +70,8 @@ export default function BriefingCard({
           <View style={styles.body}>
             {loading && !briefing ? (
               <View style={styles.loadingRow}>
-                <ActivityIndicator color="#8EB5FF" size="small" />
-                <Text style={styles.loadingText}>Synthesizing your day…</Text>
+                <ActivityIndicator color={arcadeColors.neonCyan} size="small" />
+                <Text style={styles.loadingText}>Scanning the streets…</Text>
               </View>
             ) : null}
 
@@ -90,8 +91,8 @@ export default function BriefingCard({
                 ]}
                 onPress={onDismiss}
               >
-                <Ionicons name="checkmark-circle-outline" size={16} color="#9EB8F0" />
-                <Text style={styles.dismissText}>Dismiss Briefing</Text>
+                <Ionicons name="checkmark-circle-outline" size={16} color={arcadeColors.neonPink} />
+                <Text style={styles.dismissText}>Close Bulletin</Text>
               </Pressable>
             </View>
           </View>
@@ -104,11 +105,16 @@ export default function BriefingCard({
 const styles = StyleSheet.create({
   wrapper: {
     marginBottom: 12,
-    borderRadius: 18,
+    borderRadius: 8,
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(142, 181, 255, 0.22)',
-    backgroundColor: '#141B33',
+    borderWidth: 2,
+    borderColor: arcadeColors.borderCyan,
+    backgroundColor: arcadeColors.bgPanel,
+    shadowColor: arcadeColors.neonCyan,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 4,
   },
   glowTop: {
     position: 'absolute',
@@ -116,7 +122,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 80,
-    backgroundColor: 'rgba(91, 141, 239, 0.14)',
+    backgroundColor: 'rgba(51, 255, 255, 0.08)',
   },
   card: {
     paddingHorizontal: 16,
@@ -143,21 +149,24 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   title: {
-    color: '#F4F7FF',
-    fontSize: 16,
-    fontWeight: '700',
-    letterSpacing: 0.2,
+    fontFamily: arcadeFonts.pixel,
+    fontSize: 9,
+    lineHeight: 14,
+    letterSpacing: 0.5,
+    ...neonCyanText(),
   },
   meta: {
-    color: '#8FA3CC',
-    fontSize: 12,
+    color: arcadeColors.textMuted,
+    fontSize: 11,
+    fontFamily: arcadeFonts.body,
     lineHeight: 16,
   },
   body: {
     marginTop: 14,
     paddingTop: 14,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(142, 181, 255, 0.12)',
+    borderTopColor: arcadeColors.borderMuted,
+    overflow: 'hidden',
   },
   loadingRow: {
     flexDirection: 'row',

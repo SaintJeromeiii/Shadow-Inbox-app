@@ -45,5 +45,7 @@ export const SHADOW_LABEL_STYLES: Record<
 };
 
 export function formatShadowLabelName(name: string): string {
-  return name.replace(/^Shadow\//, '');
+  const stripped = name.replace(/^Shadow\//, '');
+  if (stripped === 'Action-Required') return 'OPEN CASE';
+  return stripped;
 }

@@ -5,18 +5,18 @@ const { appendExecutiveBrief } = require('./executiveBriefsLedger');
 const REQUEST_TIMEOUT_MS = 45_000;
 const BRIEFING_WINDOW_HOURS = 24;
 
-const EXECUTIVE_BRIEFING_SYSTEM_PROMPT = `You are an elite military Chief of Staff writing a daily Intelligence Brief. Summarize the last 24 hours of incoming data streams into a clean, highly scannable Markdown format.
+const EXECUTIVE_BRIEFING_SYSTEM_PROMPT = `You are the chief of a shadow detective bureau writing a daily Crime Bulletin. Summarize the last 24 hours of incoming data streams into a clean, highly scannable Markdown format.
 
 Structure it exactly like this:
 
-### ⚡ SITREP (Situation Report)
+### CRIME BULLETIN
 - [2-sentence high-level overview of active signals]
 
-### 🎯 Action Items & Priorities
+### ACTION ITEMS & PRIORITIES
 - **[High]** [Actionable item extracted from logs]
 - **[Routine]** [General maintenance/follow-up task]
 
-### 🔍 Signal Filtering
+### SIGNAL FILTERING
 A brief Markdown table matching: | Source | Critical Alert | Noise Status |
 
 Rules:
@@ -27,14 +27,14 @@ Rules:
 - No preamble, no sign-off, no filler phrases.
 - Reference specific senders or subjects when it adds clarity.`;
 
-const QUIET_BRIEFING_MARKDOWN = `### ⚡ SITREP (Situation Report)
+const QUIET_BRIEFING_MARKDOWN = `### CRIME BULLETIN
 - System quiet over the last 24 hours.
 - No inbound signals were detected across monitored data streams.
 
-### 🎯 Action Items & Priorities
+### ACTION ITEMS & PRIORITIES
 - **[Routine]** No immediate action items — inbox is clear.
 
-### 🔍 Signal Filtering
+### SIGNAL FILTERING
 | Source | Critical Alert | Noise Status |
 | --- | --- | --- |
 | All channels | None | Quiet |`;
@@ -333,14 +333,14 @@ function buildFallbackBriefing(items) {
     })
     .join('\n');
 
-  return `### ⚡ SITREP (Situation Report)
+  return `### CRIME BULLETIN
 ${sitrep}
 
-### 🎯 Action Items & Priorities
+### ACTION ITEMS & PRIORITIES
 ${priorityLines}
 ${routineLines}
 
-### 🔍 Signal Filtering
+### SIGNAL FILTERING
 | Source | Critical Alert | Noise Status |
 | --- | --- | --- |
 ${tableRows}`;

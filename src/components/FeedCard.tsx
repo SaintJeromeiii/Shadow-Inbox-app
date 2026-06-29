@@ -10,6 +10,7 @@ import {
   Keyboard,
   Animated,
   ScrollView,
+  Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
@@ -26,6 +27,14 @@ import {
   REPLY_TONE_OPTIONS,
   type ReplyTone,
 } from '../types/replyTone';
+import { generateQuickReplies } from '../services/quickReplyService';
+import {
+  QUICK_REPLY_CHIP_LABELS,
+  type QuickReplyChipKey,
+  type QuickReplyOptions,
+} from '../types/quickReply';
+import { arcadeColors, arcadeFonts, arcadeTypography } from '../theme/arcadeTheme';
+import { ArcadeArchiveIcon, ArcadeTrashIcon } from './ArcadeIcons';
 
 interface FeedCardProps {
   notification: TriagedNotification;
@@ -156,6 +165,14 @@ export default function FeedCard({
   const [selectedTone, setSelectedTone] = useState<ReplyTone>(DEFAULT_REPLY_TONE);
   const [isEditing, setIsEditing] = useState(false);
   const [localAction, setLocalAction] = useState<'archive' | 'trash' | null>(null);
+  const [quickReplies, setQuickReplies] = useState<QuickReplyOptions | null>(null);
+  const [loadingQuickReplies, setLoadingQuickReplies] = useState(false);
+  const [quickReplyModalVisible, setQuickReplyModalVisible] = useState(false);
+  const [quickReplyModalText, setQuickReplyModalText] = useState('');
+  const [quickReplyChipKey, setQuickReplyChipKey] = useState<QuickReplyChipKey | null>(
+    null,
+  );
+  const [quickReplySending, setQuickReplySending] = useState(false);
   const {
     isRecording,
     pulseAnim,
@@ -215,6 +232,58 @@ export default function FeedCard({
       useNativeDriver: true,
     }).start();
   }, [fadeAnim, isRemoving]);
+
+  useEffect(() => {
+    if (!expanded || !isActionRequired) {
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingQuickReplies(true);
+
+    void generateQuickReplies({ messageId: notification.id })
+      .then((result) => {
+        if (cancelled) return;
+        setQuickReplies(result.options);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.warn('[FeedCard] Quick replies failed:', error);
+        setQuickReplies(null);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoadingQuickReplies(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [expanded, isActionRequired, notification.id]);
+
+  const handleQuickReplyChipPress = (key: QuickReplyChipKey, text: string) => {
+    stopCardPress();
+    setQuickReplyChipKey(key);
+    setQuickReplyModalText(text);
+    setQuickReplyModalVisible(true);
+  };
+
+  const handleQuickReplyModalSend = async () => {
+    const finalReply = quickReplyModalText.trim();
+    if (!finalReply || quickReplySending) return;
+
+    Keyboard.dismiss();
+    setQuickReplySending(true);
+    try {
+      await onSendReply(notification, finalReply);
+      setQuickReplyModalVisible(false);
+      setQuickReplyModalText('');
+      setQuickReplyChipKey(null);
+    } finally {
+      setQuickReplySending(false);
+    }
+  };
 
   const handleCopy = async () => {
     if (!draftText.trim()) return;
@@ -389,7 +458,11 @@ export default function FeedCard({
                       },
                     ]}
                   >
-                    <Text style={[styles.shadowLabelText, { color: style.textColor }]}>
+                    <Text
+                      style={[styles.shadowLabelText, { color: style.textColor }]}
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                    >
                       {formatShadowLabelName(label.name)}
                     </Text>
                   </View>
@@ -469,9 +542,9 @@ export default function FeedCard({
             accessibilityLabel="Archive email"
           >
             {localAction === 'archive' ? (
-              <ActivityIndicator size="small" color="#8B93A8" />
+              <ActivityIndicator size="small" color={arcadeColors.neonCyan} />
             ) : (
-              <Ionicons name="archive-outline" size={18} color="#8B93A8" />
+              <ArcadeArchiveIcon size={18} color={arcadeColors.textMuted} />
             )}
           </Pressable>
           <Pressable
@@ -489,9 +562,9 @@ export default function FeedCard({
             accessibilityLabel="Trash email"
           >
             {localAction === 'trash' ? (
-              <ActivityIndicator size="small" color="#FF8A8A" />
+              <ActivityIndicator size="small" color={arcadeColors.neonRed} />
             ) : (
-              <Ionicons name="trash-outline" size={18} color="#FF8A8A" />
+              <ArcadeTrashIcon size={18} color={arcadeColors.neonRed} />
             )}
           </Pressable>
         </View>
@@ -503,6 +576,54 @@ export default function FeedCard({
           <View style={styles.rawTextContainer}>
             <Text style={styles.rawText}>{notification.rawText}</Text>
           </View>
+
+          {isActionRequired && (
+            <View style={styles.quickReplySection}>
+              <View style={styles.quickReplyHeader}>
+                <Ionicons name="sparkles-outline" size={14} color="#9B7BFF" />
+                <Text style={styles.quickReplyTitle}>AI Reply Assistant</Text>
+              </View>
+              {loadingQuickReplies ? (
+                <View style={styles.quickReplyLoading}>
+                  <ActivityIndicator color="#9B7BFF" size="small" />
+                  <Text style={styles.quickReplyLoadingText}>Generating options…</Text>
+                </View>
+              ) : quickReplies ? (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.quickReplyChipRow}
+                  keyboardShouldPersistTaps="handled"
+                >
+                  {(Object.keys(QUICK_REPLY_CHIP_LABELS) as QuickReplyChipKey[]).map(
+                    (key) => (
+                      <Pressable
+                        key={key}
+                        style={({ pressed }) => [
+                          styles.quickReplyChip,
+                          pressed && !busy && styles.quickReplyChipPressed,
+                          busy && styles.quickReplyChipDisabled,
+                        ]}
+                        onPress={(e) => {
+                          stopCardPress(e);
+                          handleQuickReplyChipPress(key, quickReplies[key]);
+                        }}
+                        disabled={busy}
+                      >
+                        <Text style={styles.quickReplyChipText}>
+                          {QUICK_REPLY_CHIP_LABELS[key]}
+                        </Text>
+                      </Pressable>
+                    ),
+                  )}
+                </ScrollView>
+              ) : (
+                <Text style={styles.quickReplyEmpty}>
+                  Could not load AI suggestions. Use the draft box below.
+                </Text>
+              )}
+            </View>
+          )}
 
           {isActionRequired && (
             <Pressable
@@ -731,22 +852,90 @@ export default function FeedCard({
         </View>
       )}
     </Pressable>
+
+      <Modal
+        visible={quickReplyModalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => {
+          if (!quickReplySending) {
+            setQuickReplyModalVisible(false);
+          }
+        }}
+      >
+        <Pressable
+          style={styles.quickReplyModalBackdrop}
+          onPress={() => {
+            if (!quickReplySending) {
+              setQuickReplyModalVisible(false);
+            }
+          }}
+        >
+          <Pressable style={styles.quickReplyModalSheet} onPress={stopCardPress}>
+            <View style={styles.quickReplyModalHandle} />
+            <Text style={styles.quickReplyModalTitle}>
+              {quickReplyChipKey
+                ? QUICK_REPLY_CHIP_LABELS[quickReplyChipKey]
+                : 'Review Reply'}
+            </Text>
+            <Text style={styles.quickReplyModalHint}>
+              Edit freely — your final text is what gets sent.
+            </Text>
+            <TextInput
+              style={styles.quickReplyModalInput}
+              value={quickReplyModalText}
+              onChangeText={setQuickReplyModalText}
+              multiline
+              textAlignVertical="top"
+              placeholder="Your reply…"
+              placeholderTextColor="#5C6478"
+              editable={!quickReplySending}
+              autoFocus
+              selectionColor="#9B7BFF"
+            />
+            <Pressable
+              style={({ pressed }) => [
+                styles.quickReplyModalSend,
+                (!quickReplyModalText.trim() || quickReplySending) &&
+                  styles.quickReplyModalSendDisabled,
+                pressed &&
+                  quickReplyModalText.trim() &&
+                  !quickReplySending &&
+                  styles.buttonPressed,
+              ]}
+              onPress={() => {
+                void handleQuickReplyModalSend();
+              }}
+              disabled={!quickReplyModalText.trim() || quickReplySending}
+            >
+              {quickReplySending ? (
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : (
+                <>
+                  <Ionicons name="send" size={17} color="#FFFFFF" />
+                  <Text style={styles.quickReplyModalSendText}>Send Reply</Text>
+                </>
+              )}
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#141824',
-    borderRadius: 18,
+    backgroundColor: arcadeColors.bgPanel,
+    borderRadius: 8,
     padding: 18,
     marginBottom: 14,
-    borderWidth: 1,
-    borderColor: '#232A38',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.18,
-    shadowRadius: 14,
+    borderWidth: 2,
+    borderColor: arcadeColors.borderCyan,
+    shadowColor: arcadeColors.neonCyan,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
     elevation: 4,
   },
   cardPressed: {
@@ -754,8 +943,8 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.995 }],
   },
   cardExpanded: {
-    borderColor: '#3D4F6F',
-    backgroundColor: '#161B27',
+    borderColor: arcadeColors.borderPink,
+    backgroundColor: arcadeColors.bgPanelElevated,
   },
   cardTopRow: {
     flexDirection: 'row',
@@ -766,12 +955,14 @@ const styles = StyleSheet.create({
   },
   cardTopLeft: {
     flex: 1,
+    minWidth: 0,
     gap: 8,
   },
   labelRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 6,
+    maxWidth: '100%',
   },
   attachmentRow: {
     flexDirection: 'row',
@@ -807,13 +998,16 @@ const styles = StyleSheet.create({
   },
   shadowLabelPill: {
     borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 10,
+    borderRadius: 4,
+    paddingHorizontal: 8,
     paddingVertical: 4,
+    maxWidth: '100%',
+    flexShrink: 1,
   },
   shadowLabelText: {
-    fontSize: 11,
-    fontWeight: '700',
+    fontSize: 9,
+    fontFamily: arcadeFonts.pixel,
+    lineHeight: 12,
     letterSpacing: 0.2,
   },
   sourceTag: {
@@ -874,19 +1068,15 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   sender: {
-    color: '#8B93A8',
-    fontSize: 12,
-    fontWeight: '600',
-    letterSpacing: 0.2,
-    textTransform: 'uppercase',
+    ...arcadeTypography.sectionLabel,
+    color: arcadeColors.neonPink,
     marginBottom: 8,
   },
   summary: {
-    color: '#F4F6FB',
-    fontSize: 17,
-    lineHeight: 24,
-    fontWeight: '600',
-    letterSpacing: -0.2,
+    ...arcadeTypography.retroBodyBright,
+    fontSize: 16,
+    lineHeight: 23,
+    color: arcadeColors.neonCyan,
   },
   metaRow: {
     flexDirection: 'row',
@@ -895,9 +1085,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   timestamp: {
-    color: '#5C6478',
-    fontSize: 12,
-    fontWeight: '500',
+    ...arcadeTypography.retroMeta,
   },
   quickActions: {
     flexDirection: 'row',
@@ -908,16 +1096,16 @@ const styles = StyleSheet.create({
   quickActionButton: {
     width: 36,
     height: 36,
-    borderRadius: 10,
+    borderRadius: 4,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#1A2030',
-    borderWidth: 1,
-    borderColor: '#2E3548',
+    backgroundColor: arcadeColors.bgDeep,
+    borderWidth: 2,
+    borderColor: arcadeColors.borderMuted,
   },
   quickActionDanger: {
-    borderColor: 'rgba(255, 107, 107, 0.25)',
-    backgroundColor: 'rgba(255, 107, 107, 0.08)',
+    borderColor: 'rgba(255, 68, 102, 0.55)',
+    backgroundColor: 'rgba(255, 68, 102, 0.12)',
   },
   quickActionPressed: {
     opacity: 0.75,
@@ -929,36 +1117,33 @@ const styles = StyleSheet.create({
     marginTop: 18,
     paddingTop: 18,
     borderTopWidth: 1,
-    borderTopColor: '#2A3142',
+    borderTopColor: arcadeColors.borderMuted,
   },
   expandedLabel: {
-    color: '#6B7288',
-    fontSize: 11,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.9,
+    ...arcadeTypography.sectionLabel,
+    color: arcadeColors.textDim,
     marginBottom: 10,
   },
   rawTextContainer: {
-    backgroundColor: '#0D0F14',
-    borderRadius: 10,
+    backgroundColor: arcadeColors.bgDeep,
+    borderRadius: 4,
     padding: 12,
-    borderWidth: 1,
-    borderColor: '#232A38',
+    borderWidth: 2,
+    borderColor: arcadeColors.borderMuted,
   },
   rawText: {
-    color: '#B8BECF',
-    fontSize: 13,
-    lineHeight: 20,
-    fontFamily: 'monospace',
+    ...arcadeTypography.retroBody,
+    fontSize: 12,
+    lineHeight: 19,
   },
   replyBlock: {
     marginTop: 16,
-    backgroundColor: '#10141D',
-    borderRadius: 14,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: '#2A3550',
+    backgroundColor: arcadeColors.bgDeep,
+    borderRadius: 4,
+    padding: 12,
+    borderWidth: 2,
+    borderColor: arcadeColors.borderMuted,
+    overflow: 'hidden',
   },
   calendarGuardSection: {
     marginBottom: 14,
@@ -1044,6 +1229,126 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 16,
   },
+  quickReplySection: {
+    marginTop: 14,
+    marginBottom: 4,
+    gap: 10,
+    overflow: 'hidden',
+  },
+  quickReplyHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  quickReplyTitle: {
+    color: '#9B7BFF',
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+  },
+  quickReplyLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 6,
+  },
+  quickReplyLoadingText: {
+    color: '#8B93A8',
+    fontSize: 12,
+  },
+  quickReplyChipRow: {
+    gap: 8,
+    paddingRight: 4,
+  },
+  quickReplyChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: '#1E2230',
+    borderWidth: 1,
+    borderColor: '#4A3F7A',
+  },
+  quickReplyChipPressed: {
+    backgroundColor: '#2A2540',
+    borderColor: '#9B7BFF',
+  },
+  quickReplyChipDisabled: {
+    opacity: 0.5,
+  },
+  quickReplyChipText: {
+    color: '#D8CCFF',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  quickReplyEmpty: {
+    color: '#6B7288',
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  quickReplyModalBackdrop: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+  },
+  quickReplyModalSheet: {
+    backgroundColor: '#141824',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 34,
+    borderWidth: 1,
+    borderColor: '#2A3142',
+    gap: 12,
+  },
+  quickReplyModalHandle: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#3D4558',
+    marginBottom: 4,
+  },
+  quickReplyModalTitle: {
+    color: '#E8ECF4',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  quickReplyModalHint: {
+    color: '#6B7288',
+    fontSize: 12,
+  },
+  quickReplyModalInput: {
+    color: '#E8ECF4',
+    fontSize: 15,
+    lineHeight: 22,
+    minHeight: 140,
+    maxHeight: 220,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    backgroundColor: '#0D0F14',
+    borderWidth: 1,
+    borderColor: '#4A3F7A',
+    borderRadius: 12,
+  },
+  quickReplyModalSend: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#9B7BFF',
+    borderRadius: 12,
+    paddingVertical: 14,
+    marginTop: 4,
+  },
+  quickReplyModalSendDisabled: {
+    opacity: 0.45,
+  },
+  quickReplyModalSendText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+  },
   replyHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1051,31 +1356,29 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   replyLabel: {
-    color: '#5B8DEF',
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 0.4,
+    ...arcadeTypography.sectionLabel,
+    color: arcadeColors.neonPink,
   },
   replyHint: {
-    color: '#6B7288',
-    fontSize: 12,
+    ...arcadeTypography.retroCaption,
     marginBottom: 12,
   },
   replyInputWrap: {
     position: 'relative',
   },
   replyInput: {
-    color: '#E8ECF4',
-    fontSize: 15,
+    color: arcadeColors.neonCyan,
+    fontFamily: arcadeFonts.body,
+    fontSize: 14,
     lineHeight: 22,
     minHeight: 108,
     maxHeight: 180,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    backgroundColor: '#0D0F14',
-    borderWidth: 1,
-    borderColor: '#3D4F6F',
-    borderRadius: 10,
+    backgroundColor: arcadeColors.bgDeep,
+    borderWidth: 2,
+    borderColor: arcadeColors.borderMuted,
+    borderRadius: 8,
   },
   redraftOverlay: {
     ...StyleSheet.absoluteFillObject,

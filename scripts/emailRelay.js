@@ -42,6 +42,12 @@ const financesRouter = require('../backend/routes/finances');
 const notificationsRouter = require('../backend/routes/notifications');
 const voiceRouter = require('../backend/routes/voice');
 const briefingRouter = require('../backend/routes/briefing');
+const timelineRouter = require('../backend/routes/timeline');
+const firewallRouter = require('../backend/routes/firewall');
+const repliesRouter = require('../backend/routes/replies');
+const userRouter = require('../backend/routes/user');
+const { recordDeletions, getPlayerStats } = require('../backend/userProgressService');
+const { getCharacterIdFromRequest } = require('../backend/characterIds');
 const { handleSlackWebhook } = require('../backend/slackWebhook');
 
 const knowledgeBase = loadKnowledgeBase();
@@ -142,6 +148,10 @@ app.use('/api/finances', financesRouter);
 app.use('/api/notifications', notificationsRouter);
 app.use('/api/voice', voiceRouter);
 app.use('/api/briefing', briefingRouter);
+app.use('/api/timeline', timelineRouter);
+app.use('/api/firewall', firewallRouter);
+app.use('/api/replies', repliesRouter);
+app.use('/api/user', userRouter);
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', service: 'shadow-inbox-email-relay' });
@@ -478,8 +488,28 @@ app.post('/send-reply', async (req, res) => {
   }
 
   try {
-    const transporter = await createTransporter(accountKey);
     const account = getAccount(accountKey);
+    if (account?.oauth) {
+      const { sendGmailMessage } = require('../backend/gmailApi');
+      const result = await sendGmailMessage(accountKey, {
+        to: recipient.trim(),
+        subject: subject.trim(),
+        body: replyText.trim(),
+      });
+
+      console.log(
+        `[${accountKey}] Sent reply to ${recipient} via Gmail API (messageId: ${result.id})`,
+      );
+      res.status(200).json({
+        success: true,
+        messageId: result.id,
+        accountKey,
+        transport: 'gmail_api',
+      });
+      return;
+    }
+
+    const transporter = await createTransporter(accountKey);
     const info = await transporter.sendMail({
       from: account.smtp.user,
       to: recipient.trim(),
@@ -536,6 +566,18 @@ app.post('/api/emails/archive', async (req, res) => {
     }
 
     const feedResult = await removeNotificationIds(accountKey, ids);
+    const characterId = getCharacterIdFromRequest(req);
+
+    let playerStats = null;
+    try {
+      if (feedResult.removedCount > 0) {
+        playerStats = await recordDeletions(accountKey, feedResult.removedCount, characterId);
+      } else {
+        playerStats = await getPlayerStats(accountKey, characterId);
+      }
+    } catch (progressError) {
+      console.warn(`[${accountKey}] Player progress update failed:`, progressError);
+    }
 
     console.log(
       `[${accountKey}] Archived ${gmailResult.archived} message(s); pruned ${feedResult.removedCount} from feed.`,
@@ -544,10 +586,12 @@ app.post('/api/emails/archive', async (req, res) => {
     res.status(200).json({
       success: true,
       accountKey,
+      characterId,
       archived: gmailResult.archived,
       feedRemoved: feedResult.removedCount,
       unsupported: gmailResult.unsupported,
       remainingInFeed: feedResult.remainingCount,
+      playerStats,
     });
   } catch (error) {
     console.error(`[${accountKey}] Gmail archive failed:`, error);
@@ -581,6 +625,18 @@ app.post('/api/emails/trash', async (req, res) => {
     }
 
     const feedResult = await removeNotificationIds(accountKey, ids);
+    const characterId = getCharacterIdFromRequest(req);
+
+    let playerStats = null;
+    try {
+      if (feedResult.removedCount > 0) {
+        playerStats = await recordDeletions(accountKey, feedResult.removedCount, characterId);
+      } else {
+        playerStats = await getPlayerStats(accountKey, characterId);
+      }
+    } catch (progressError) {
+      console.warn(`[${accountKey}] Player progress update failed:`, progressError);
+    }
 
     console.log(
       `[${accountKey}] Trashed ${gmailResult.trashed} message(s); pruned ${feedResult.removedCount} from feed.`,
@@ -589,10 +645,12 @@ app.post('/api/emails/trash', async (req, res) => {
     res.status(200).json({
       success: true,
       accountKey,
+      characterId,
       trashed: gmailResult.trashed,
       feedRemoved: feedResult.removedCount,
       unsupported: gmailResult.unsupported,
       remainingInFeed: feedResult.remainingCount,
+      playerStats,
     });
   } catch (error) {
     console.error(`[${accountKey}] Gmail trash failed:`, error);

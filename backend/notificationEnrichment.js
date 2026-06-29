@@ -20,6 +20,34 @@ const {
 } = require('./calendarIntentService');
 const { maybeAutoPilot } = require('./autoPilotService');
 const { maybeExtractFinance } = require('./financeExtractionService');
+const {
+  loadActiveFirewallRules,
+  evaluateFirewallForNotification,
+  applyFirewallHighPriority,
+  applyFirewallMutedArchive,
+} = require('./firewallService');
+
+async function finalizeEnrichedNotification(accountKey, notification, firewall) {
+  let finalNotification = notification;
+
+  if (firewall.forceHighPriority) {
+    finalNotification = applyFirewallHighPriority(finalNotification);
+  } else if (firewall.mutedArchive) {
+    finalNotification = applyFirewallMutedArchive(finalNotification);
+  }
+
+  if (!firewall.mutedArchive) {
+    await maybeSendPriorityPush(accountKey, finalNotification, {
+      force: firewall.forceHighPriority,
+    });
+  } else {
+    console.log(
+      `[Firewall][${accountKey}] MUTED_ARCHIVE ${finalNotification.id} — push suppressed`,
+    );
+  }
+
+  return finalNotification;
+}
 
 function mergeNotification(existing, incoming) {
   if (!existing) {
@@ -53,13 +81,25 @@ async function enrichNotifications(
   const pendingAttachments = options.pendingAttachments || new Map();
   const existingById = new Map(existingNotifications.map((item) => [item.id, item]));
   const enriched = [];
+  const firewallRules = await loadActiveFirewallRules(accountKey);
 
   for (const notification of notifications) {
+    const firewall = evaluateFirewallForNotification(notification, firewallRules);
+
+    if (firewall.blockDrop) {
+      console.log(
+        `[Firewall][${accountKey}] BLOCK_DROP ${notification.id} via rule ${firewall.ruleId}`,
+      );
+      continue;
+    }
+
     const previous = existingById.get(notification.id);
     const merged = mergeNotification(previous, notification);
 
     if (merged.triage && merged.shadowLabels?.length) {
-      enriched.push(merged);
+      enriched.push(
+        await finalizeEnrichedNotification(accountKey, merged, firewall),
+      );
       continue;
     }
 
@@ -70,13 +110,17 @@ async function enrichNotifications(
           merged,
           merged.triage,
         );
-        enriched.push(labeled);
+        enriched.push(
+          await finalizeEnrichedNotification(accountKey, labeled, firewall),
+        );
       } catch (error) {
         console.warn(
           `[${accountKey}] Could not apply labels to ${merged.id}:`,
           error.message,
         );
-        enriched.push(merged);
+        enriched.push(
+          await finalizeEnrichedNotification(accountKey, merged, firewall),
+        );
       }
       continue;
     }
@@ -203,11 +247,18 @@ async function enrichNotifications(
         continue;
       }
 
-      enriched.push(pilotResult.notification);
-      await maybeSendPriorityPush(accountKey, pilotResult.notification);
+      enriched.push(
+        await finalizeEnrichedNotification(
+          accountKey,
+          pilotResult.notification,
+          firewall,
+        ),
+      );
     } catch (error) {
       console.warn(`[${accountKey}] Triage failed for ${merged.id}:`, error.message);
-      enriched.push(merged);
+      enriched.push(
+        await finalizeEnrichedNotification(accountKey, merged, firewall),
+      );
     }
   }
 

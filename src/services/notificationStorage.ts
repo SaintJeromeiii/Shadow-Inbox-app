@@ -40,13 +40,22 @@ export async function clearPersistedNotifications(
   await AsyncStorage.removeItem(storageKey(accountKey));
 }
 
+function dedupeNotificationsById<T extends { id: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+}
+
 function mergeWithSeed(
   seed: RawNotification[],
   persisted: TriagedNotification[],
 ): TriagedNotification[] {
   const persistedById = new Map(persisted.map((item) => [item.id, item]));
 
-  return seed.map((seedItem) => {
+  return dedupeNotificationsById(seed).map((seedItem) => {
     const saved = persistedById.get(seedItem.id);
     if (!saved) {
       return { ...seedItem };

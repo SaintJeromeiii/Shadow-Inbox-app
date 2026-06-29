@@ -40,6 +40,104 @@ async function gmailApiRequest(accountKey, path, options = {}) {
   return payload;
 }
 
+function formatMessageIdHeader(messageIdHeader) {
+  if (!messageIdHeader) return null;
+  const trimmed = String(messageIdHeader).trim();
+  if (!trimmed) return null;
+  return trimmed.startsWith('<') ? trimmed : `<${trimmed}>`;
+}
+
+function encodeMimeForGmail(mime) {
+  return Buffer.from(mime)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+function buildPlainTextMime({ from, to, subject, body, inReplyTo, references }) {
+  const lines = [
+    `From: ${from}`,
+    `To: ${to}`,
+    `Subject: ${subject}`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/plain; charset=utf-8',
+    'Content-Transfer-Encoding: 7bit',
+  ];
+
+  const replyHeader = formatMessageIdHeader(inReplyTo);
+  if (replyHeader) {
+    lines.push(`In-Reply-To: ${replyHeader}`);
+    lines.push(`References: ${references || replyHeader}`);
+  }
+
+  lines.push('', String(body || '').trim());
+  return lines.join('\r\n');
+}
+
+async function resolveThreadId(accountKey, gmailApiMessageId) {
+  if (!gmailApiMessageId) return null;
+
+  try {
+    const payload = await gmailApiRequest(
+      accountKey,
+      `/messages/${encodeURIComponent(gmailApiMessageId)}?format=metadata`,
+    );
+    return payload.threadId || null;
+  } catch (error) {
+    console.warn(
+      `[GmailAPI] Could not resolve thread for message ${gmailApiMessageId}:`,
+      error instanceof Error ? error.message : error,
+    );
+    return null;
+  }
+}
+
+/**
+ * Send email via Gmail REST API (HTTPS). Use for OAuth-linked accounts on Railway
+ * where outbound SMTP (smtp.gmail.com) is blocked or unreachable.
+ */
+async function sendGmailMessage(accountKey, {
+  to,
+  subject,
+  body,
+  inReplyTo = null,
+  references = null,
+  gmailApiMessageId = null,
+}) {
+  const account = getAccount(resolveAccountKey(accountKey));
+  if (!account?.oauth) {
+    throw new Error(`Gmail API send requires a linked Google account (${accountKey}).`);
+  }
+
+  const from = account.email;
+  if (!from) {
+    throw new Error(`No sender email configured for account "${accountKey}".`);
+  }
+
+  const threadId = await resolveThreadId(accountKey, gmailApiMessageId);
+  const raw = encodeMimeForGmail(
+    buildPlainTextMime({
+      from,
+      to,
+      subject,
+      body,
+      inReplyTo,
+      references,
+    }),
+  );
+
+  const payload = { raw };
+  if (threadId) {
+    payload.threadId = threadId;
+  }
+
+  return gmailApiRequest(accountKey, '/messages/send', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 async function listLabels(accountKey) {
   const payload = await gmailApiRequest(accountKey, '/labels');
   return payload.labels || [];
@@ -114,6 +212,7 @@ async function resolveGmailMessageId(accountKey, { messageIdHeader, subject, tim
 
 module.exports = {
   gmailApiRequest,
+  sendGmailMessage,
   listLabels,
   createLabel,
   modifyMessageLabels,

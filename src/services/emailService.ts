@@ -2,6 +2,9 @@ import Constants from 'expo-constants';
 import type { TriagedNotification } from '../types/notification';
 import type { AccountKey } from '../types/account';
 import type { ReplyTone } from '../types/replyTone';
+import type { PlayerStats } from '../types/userProgress';
+import type { CharacterId } from '../types/character';
+import { DEFAULT_CHARACTER_ID } from '../constants/characters';
 
 const RELAY_URL =
   process.env.EXPO_PUBLIC_EMAIL_RELAY_URL ??
@@ -10,6 +13,7 @@ const RELAY_URL =
 const REQUEST_TIMEOUT_MS = 15_000;
 
 let activeAccountKey: AccountKey = 'personal';
+let activeCharacterId: CharacterId = DEFAULT_CHARACTER_ID;
 
 export function setActiveAccountKey(accountKey: AccountKey): void {
   activeAccountKey = accountKey;
@@ -19,10 +23,19 @@ export function getActiveAccountKey(): AccountKey {
   return activeAccountKey;
 }
 
+export function setActiveCharacterId(characterId: CharacterId): void {
+  activeCharacterId = characterId;
+}
+
+export function getActiveCharacterId(): CharacterId {
+  return activeCharacterId;
+}
+
 function relayHeaders(extra?: HeadersInit): HeadersInit {
   return {
     'Content-Type': 'application/json',
     'X-Account-Key': activeAccountKey,
+    'X-Character-Id': activeCharacterId,
     ...extra,
   };
 }
@@ -36,6 +49,7 @@ export interface SendReplyPayload {
 export interface SendReplyResult {
   success: boolean;
   error?: string;
+  playerStats?: PlayerStats;
 }
 
 export interface GmailActionResult {
@@ -43,6 +57,7 @@ export interface GmailActionResult {
   error?: string;
   processed?: number;
   unsupported?: string[];
+  playerStats?: PlayerStats;
 }
 
 export function parseRecipientEmail(sender: string): string | null {
@@ -145,10 +160,11 @@ export async function sendReply(
   }
 
   try {
-    const response = await relayFetch('/api/broadcast/reply', {
+    const response = await relayFetch('/api/replies/send', {
       method: 'POST',
       headers: relayHeaders(),
       body: JSON.stringify({
+        messageId: notification.id,
         notificationId: notification.id,
         replyText: trimmedReply,
       }),
@@ -168,7 +184,8 @@ export async function sendReply(
       return { success: false, error: errorMessage };
     }
 
-    return { success: true };
+    const data = (await response.json()) as { playerStats?: PlayerStats };
+    return { success: true, playerStats: data.playerStats };
   } catch (error) {
     const message =
       error instanceof Error
@@ -217,12 +234,14 @@ async function postGmailAction(
       archived?: number;
       trashed?: number;
       unsupported?: string[];
+      playerStats?: PlayerStats;
     };
 
     return {
       success: true,
       processed: data.archived ?? data.trashed ?? ids.length,
       unsupported: data.unsupported,
+      playerStats: data.playerStats,
     };
   } catch (error) {
     const message =

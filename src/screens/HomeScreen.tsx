@@ -12,7 +12,7 @@ import {
   Platform,
   UIManager,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import FeedCard from '../components/FeedCard';
 import {
@@ -37,37 +37,47 @@ import {
 } from '../services/pushNotifications';
 import { useAccount } from '../context/AccountContext';
 import AccountSwitcherSheet from '../components/AccountSwitcherSheet';
-import BriefingCard from '../components/BriefingCard';
-import TaskBoard from '../components/TaskBoard';
-import FinanceRunwayStrip from '../components/FinanceRunwayStrip';
 import VoiceNoteButton from '../components/VoiceNoteButton';
-import KnowledgeScreen from '../screens/KnowledgeScreen';
-import AutoPilotScreen from '../screens/AutoPilotScreen';
 import { useGoogleSignIn } from '../hooks/useGoogleSignIn';
 import { removeRelayAccount } from '../services/authService';
 import { hideAccountOnDevice, unhideAccountOnDevice } from '../services/accountStorage';
-import {
-  dismissBriefingForToday,
-  fetchDailyBriefing,
-  isBriefingDismissedForToday,
-} from '../services/briefingService';
 import type { AccountKey } from '../types/account';
 import type { AccountProfile } from '../types/account';
-import type { DailyBriefing } from '../types/briefing';
 import type { FeedTab, TriagedNotification } from '../types/notification';
-import type { ExtractedTask } from '../types/task';
-import {
-  fetchExtractedTasks,
-  toggleExtractedTask,
-} from '../services/taskService';
-import { fetchFinanceSummary } from '../services/financeService';
-import type { FinanceSummary } from '../types/finance';
 import { sendVoiceCommand } from '../services/voiceCommandService';
+import ArcadeTitle from '../components/ArcadeTitle';
+import {
+  ArcadeHamburgerIcon,
+} from '../components/ArcadeIcons';
+import { useRetroFeedback } from '../context/RetroFeedbackContext';
+import { arcadeColors, arcadeFonts, arcadeRadii } from '../theme/arcadeTheme';
+import PlayerAvatarCard from '../components/PlayerAvatarCard';
+import IconLegendMinimap from '../components/IconLegendMinimap';
+import StageDifficultyBanner from '../components/StageDifficultyBanner';
+import BossLevelPulseFrame from '../components/BossLevelPulseFrame';
+import { fetchPlayerStats, recordPlayerDeletion } from '../services/userProgressService';
+import { saveLocalCharacterDeletions } from '../services/characterProgressStorage';
+import type { PlayerStats } from '../types/userProgress';
+import {
+  applyDeletionLocally,
+  buildPlayerStats,
+  didLevelUp,
+} from '../utils/playerProgress';
+import { getStageDifficulty, isBossLevel } from '../utils/stageDifficulty';
+import { useCharacter } from '../context/CharacterContext';
+
+interface HomeScreenProps {
+  onOpenDrawer: () => void;
+  focusEmailId?: string | null;
+  onFocusEmailHandled?: () => void;
+  onNotificationsChange?: (notifications: TriagedNotification[]) => void;
+  isScreenFocused?: boolean;
+}
 
 const TABS: { key: FeedTab; label: string }[] = [
-  { key: 'action_required', label: 'Action Required' },
-  { key: 'fyi', label: 'FYI' },
-  { key: 'ignore', label: 'Archived' },
+  { key: 'action_required', label: 'OPEN CASES' },
+  { key: 'fyi', label: 'INTEL' },
+  { key: 'ignore', label: 'ARCHIVED' },
 ];
 
 if (
@@ -118,7 +128,13 @@ function formatLastChecked(date: Date | null): string {
   });
 }
 
-export default function HomeScreen() {
+export default function HomeScreen({
+  onOpenDrawer,
+  focusEmailId: externalFocusEmailId = null,
+  onFocusEmailHandled,
+  onNotificationsChange,
+  isScreenFocused = true,
+}: HomeScreenProps) {
   const {
     activeAccount,
     activeProfile,
@@ -141,21 +157,18 @@ export default function HomeScreen() {
   const [bulkSending, setBulkSending] = useState(false);
   const [accountSheetVisible, setAccountSheetVisible] = useState(false);
   const [removingAccountKey, setRemovingAccountKey] = useState<AccountKey | null>(null);
-  const [briefing, setBriefing] = useState<DailyBriefing | null>(null);
-  const [briefingLoading, setBriefingLoading] = useState(false);
-  const [briefingError, setBriefingError] = useState<string | null>(null);
-  const [briefingHidden, setBriefingHidden] = useState(false);
-  const [tasks, setTasks] = useState<ExtractedTask[]>([]);
-  const [tasksLoading, setTasksLoading] = useState(false);
-  const [financeSummary, setFinanceSummary] = useState<FinanceSummary | null>(null);
-  const [financeLoading, setFinanceLoading] = useState(false);
   const [focusEmailId, setFocusEmailId] = useState<string | null>(null);
-  const [knowledgeVisible, setKnowledgeVisible] = useState(false);
-  const [autoPilotVisible, setAutoPilotVisible] = useState(false);
   const skipNextSave = useRef(true);
   const alertedActionIdsRef = useRef<Set<string>>(new Set());
   const loadingAccountRef = useRef<AccountKey | null>(null);
   const flatListRef = useRef<FlatList<TriagedNotification>>(null);
+  const playerStatsRef = useRef<PlayerStats | null>(null);
+  const { playDeleteSound, showActionComplete, triggerLevelUp } = useRetroFeedback();
+  const { characterId } = useCharacter();
+  const [playerStats, setPlayerStats] = useState<PlayerStats | null>(null);
+  const [avatarReplayToken, setAvatarReplayToken] = useState(0);
+  const insets = useSafeAreaInsets();
+  const wasScreenFocusedRef = useRef(isScreenFocused);
 
   const dataSource = getNotificationDataSource(activeAccount);
   const triageMode = getTriageMode();
@@ -173,6 +186,71 @@ export default function HomeScreen() {
 
     return () => clearInterval(intervalId);
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadPlayerStats() {
+      try {
+        const stats = await fetchPlayerStats(activeAccount, characterId);
+        if (cancelled) return;
+        playerStatsRef.current = stats;
+        setPlayerStats(stats);
+      } catch (error) {
+        console.warn('[Shadow Inbox] Failed to load player stats:', error);
+        if (cancelled) return;
+        const fallback = buildPlayerStats(0);
+        playerStatsRef.current = fallback;
+        setPlayerStats(fallback);
+      }
+    }
+
+    void loadPlayerStats();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeAccount, characterId]);
+
+  useEffect(() => {
+    setAvatarReplayToken((token) => token + 1);
+  }, [characterId]);
+
+  const applyPlayerStats = useCallback(
+    (nextStats: PlayerStats) => {
+      const previous = playerStatsRef.current;
+      if (previous && didLevelUp(previous.totalDeletions, nextStats.totalDeletions)) {
+        triggerLevelUp(nextStats.tierName);
+      }
+      playerStatsRef.current = nextStats;
+      setPlayerStats(nextStats);
+      void saveLocalCharacterDeletions(activeAccount, characterId, nextStats.totalDeletions);
+    },
+    [activeAccount, characterId, triggerLevelUp],
+  );
+
+  const applyLocalDeletion = useCallback(
+    async (count = 1) => {
+      if (playerStatsRef.current) {
+        const next = applyDeletionLocally(playerStatsRef.current, count);
+        if (next.leveledUp) {
+          triggerLevelUp(next.tierName);
+        }
+        playerStatsRef.current = next;
+        setPlayerStats(next);
+        await saveLocalCharacterDeletions(activeAccount, characterId, next.totalDeletions);
+        return;
+      }
+
+      try {
+        const stats = await recordPlayerDeletion(count, activeAccount, characterId);
+        applyPlayerStats(stats);
+      } catch (error) {
+        console.warn('[Shadow Inbox] Failed to record player deletion:', error);
+      }
+    },
+    [activeAccount, applyPlayerStats, characterId, triggerLevelUp],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -272,107 +350,26 @@ export default function HomeScreen() {
     [notifications, reloadInboxFromSource],
   );
 
-  const gatherTriageSnapshot = useCallback(
-    async (
-      activeNotifications?: TriagedNotification[],
-    ): Promise<Record<AccountKey, TriagedNotification[]>> => {
-      const snapshot: Record<AccountKey, TriagedNotification[]> = {};
-
-      for (const account of accounts) {
-        if (activeNotifications && account.key === activeAccount) {
-          snapshot[account.key] = activeNotifications;
-          continue;
-        }
-
-        snapshot[account.key] = await loadPersistedNotifications(account.key);
-      }
-
-      return snapshot;
-    },
-    [accounts, activeAccount],
-  );
-
-  const refreshBriefing = useCallback(
-    async (activeNotifications?: TriagedNotification[]) => {
-      const dismissed = await isBriefingDismissedForToday();
-      if (dismissed) {
-        setBriefingHidden(true);
-        return;
-      }
-
-      setBriefingHidden(false);
-      setBriefingLoading(true);
-      setBriefingError(null);
-
-      try {
-        const triageByAccount = await gatherTriageSnapshot(activeNotifications);
-        const result = await fetchDailyBriefing(triageByAccount);
-        setBriefing(result);
-      } catch (error) {
-        console.warn('[Shadow Inbox] Briefing fetch failed:', error);
-        setBriefingError(
-          error instanceof Error
-            ? error.message
-            : 'Could not load your morning briefing.',
-        );
-      } finally {
-        setBriefingLoading(false);
-      }
-    },
-    [gatherTriageSnapshot],
-  );
-
-  const loadTasks = useCallback(async () => {
-    setTasksLoading(true);
-    try {
-      const fetched = await fetchExtractedTasks();
-      setTasks(fetched);
-    } catch (error) {
-      console.warn('[Shadow Inbox] Task fetch failed:', error);
-    } finally {
-      setTasksLoading(false);
-    }
-  }, []);
-
-  const loadFinances = useCallback(async (accountKey?: AccountKey) => {
-    setFinanceLoading(true);
-    try {
-      const summary = await fetchFinanceSummary(accountKey ?? activeAccount);
-      setFinanceSummary(summary);
-    } catch (error) {
-      console.warn('[Shadow Inbox] Finance summary failed:', error);
-    } finally {
-      setFinanceLoading(false);
-    }
-  }, [activeAccount]);
-
-  useEffect(() => {
-    if (!accountReady) return;
-    void loadTasks();
-    void loadFinances();
-  }, [accountReady, loadTasks, loadFinances]);
-
   useEffect(() => {
     if (!accountReady) return;
 
     void (async () => {
-      const dismissed = await isBriefingDismissedForToday();
-      setBriefingHidden(dismissed);
-      const merged = await applyInboxReload(activeAccount, true);
-      if (!dismissed) {
-        await refreshBriefing(merged);
-      }
-      await loadTasks();
-      await loadFinances();
+      await applyInboxReload(activeAccount, true);
     })();
     // Initial inbox load only — account switches reload via handleSelectAccount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountReady]);
 
-  const handleDismissBriefing = useCallback(async () => {
-    await dismissBriefingForToday();
-    setBriefingHidden(true);
-  }, []);
+  useEffect(() => {
+    onNotificationsChange?.(notifications);
+  }, [notifications, onNotificationsChange]);
+
+  useEffect(() => {
+    if (!externalFocusEmailId) return;
+    setFocusEmailId(externalFocusEmailId);
+    setActiveTab('action_required');
+    onFocusEmailHandled?.();
+  }, [externalFocusEmailId, onFocusEmailHandled]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -387,15 +384,20 @@ export default function HomeScreen() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
+    setAvatarReplayToken((token) => token + 1);
     try {
-      const merged = await applyInboxReload(activeAccount, true);
-      await refreshBriefing(merged);
-      await loadTasks();
-      await loadFinances();
+      await applyInboxReload(activeAccount, true);
     } finally {
       setRefreshing(false);
     }
-  }, [activeAccount, applyInboxReload, refreshBriefing, loadTasks, loadFinances]);
+  }, [activeAccount, applyInboxReload]);
+
+  useEffect(() => {
+    if (isScreenFocused && !wasScreenFocusedRef.current) {
+      setAvatarReplayToken((token) => token + 1);
+    }
+    wasScreenFocusedRef.current = isScreenFocused;
+  }, [isScreenFocused]);
 
   const handleSelectAccount = useCallback(
     async (accountKey: AccountKey) => {
@@ -405,14 +407,12 @@ export default function HomeScreen() {
       await setActiveAccount(accountKey);
       setRefreshing(true);
       try {
-        const merged = await applyInboxReload(accountKey, true);
-        await refreshBriefing(merged);
-        await loadFinances(accountKey);
+        await applyInboxReload(accountKey, true);
       } finally {
         setRefreshing(false);
       }
     },
-    [activeAccount, applyInboxReload, refreshBriefing, setActiveAccount, loadFinances],
+    [activeAccount, applyInboxReload, setActiveAccount],
   );
 
   const handleGoogleAccountLinked = useCallback(
@@ -423,14 +423,12 @@ export default function HomeScreen() {
       await setActiveAccount(account.key);
       setRefreshing(true);
       try {
-        const merged = await applyInboxReload(account.key, true);
-        await refreshBriefing(merged);
-        await loadFinances(account.key);
+        await applyInboxReload(account.key, true);
       } finally {
         setRefreshing(false);
       }
     },
-    [applyInboxReload, refreshAccounts, refreshBriefing, setActiveAccount, loadFinances],
+    [applyInboxReload, refreshAccounts, setActiveAccount],
   );
 
   const { signInWithGoogle, signOutFromGoogle, isSigningIn: isGoogleSigningIn } =
@@ -479,8 +477,7 @@ export default function HomeScreen() {
                   if (remaining.length > 0) {
                     setRefreshing(true);
                     try {
-                      const merged = await applyInboxReload(nextAccount, false);
-                      await refreshBriefing(merged);
+                      await applyInboxReload(nextAccount, false);
                     } finally {
                       setRefreshing(false);
                     }
@@ -489,8 +486,6 @@ export default function HomeScreen() {
                     setDraftTexts({});
                     setLastUpdated(null);
                   }
-                } else {
-                  await refreshBriefing();
                 }
               } catch (error) {
                 Alert.alert(
@@ -511,7 +506,6 @@ export default function HomeScreen() {
       activeAccount,
       applyInboxReload,
       refreshAccounts,
-      refreshBriefing,
       setActiveAccount,
       signOutFromGoogle,
     ],
@@ -548,6 +542,14 @@ export default function HomeScreen() {
     return counts;
   }, [notifications]);
 
+  const activeFolderCount = tabCounts[activeTab];
+  const activeFolderLabel = TABS.find((tab) => tab.key === activeTab)?.label ?? 'STAGE';
+  const stageDifficulty = useMemo(
+    () => getStageDifficulty(activeFolderCount),
+    [activeFolderCount],
+  );
+  const bossLevelActive = isBossLevel(activeFolderCount);
+
   const actionRequiredItems = useMemo(
     () =>
       notifications.filter(
@@ -557,6 +559,10 @@ export default function HomeScreen() {
   );
 
   const showBulkSend = actionRequiredItems.length >= 2;
+  const bulkBarBottomPad = Math.max(insets.bottom, 16) + 12;
+  const listBottomPad = showBulkSend
+    ? 76 + bulkBarBottomPad
+    : 32 + Math.max(insets.bottom, 8);
 
   useEffect(() => {
     if (!focusEmailId) return;
@@ -600,87 +606,23 @@ export default function HomeScreen() {
     setDraftTexts((prev) => ({ ...prev, [id]: text }));
   }, []);
 
-  const handleToggleTask = useCallback(
-    async (task: ExtractedTask) => {
-      setTasks((prev) =>
-        prev.map((item) =>
-          item.id === task.id
-            ? {
-                ...item,
-                completed: !item.completed,
-                completedAt: !item.completed ? new Date().toISOString() : null,
-              }
-            : item,
-        ),
-      );
-
-      try {
-        const result = await toggleExtractedTask(task.id);
-        setTasks((prev) =>
-          prev.map((item) => (item.id === task.id ? result.task : item)),
-        );
-
-        if (result.archived && result.task.emailId) {
-          removeNotificationsFromFeed([result.task.emailId]);
-        }
-
-        if (result.archiveError) {
-          Alert.alert(
-            'Task Completed — Archive Pending',
-            result.archiveError,
-          );
-        }
-      } catch (error) {
-        setTasks((prev) =>
-          prev.map((item) => (item.id === task.id ? task : item)),
-        );
-        Alert.alert(
-          'Task Sync Failed',
-          error instanceof Error
-            ? error.message
-            : 'Could not update task on the relay.',
-        );
-      }
-    },
-    [removeNotificationsFromFeed],
-  );
-
-  const handleJumpToEmail = useCallback(
-    async (emailId: string) => {
-      const task = tasks.find((item) => item.emailId === emailId);
-      const accountKey = task?.accountKey ?? activeAccount;
-
-      if (accountKey !== activeAccount) {
-        await setActiveAccount(accountKey);
-        await applyInboxReload(accountKey, false);
-      }
-
-      setActiveTab('action_required');
-      setFocusEmailId(emailId);
-    },
-    [tasks, activeAccount, setActiveAccount, applyInboxReload],
-  );
-
   const feedListHeader = useMemo(
     () => (
       <View style={styles.feedListHeader}>
-        {!briefingHidden && (
-          <BriefingCard
-            briefing={briefing}
-            loading={briefingLoading}
-            error={briefingError}
-            onDismiss={() => void handleDismissBriefing()}
+        {playerStats ? (
+          <PlayerAvatarCard
+            stats={playerStats}
+            inboxCount={activeFolderCount}
+            enableIntro
+            replayToken={avatarReplayToken}
           />
-        )}
+        ) : null}
 
-        <TaskBoard
-          tasks={tasks}
-          loading={tasksLoading}
-          onToggleTask={handleToggleTask}
-          onJumpToEmail={(emailId) => void handleJumpToEmail(emailId)}
+        <StageDifficultyBanner
+          difficulty={stageDifficulty}
+          signalCount={activeFolderCount}
+          folderLabel={activeFolderLabel}
         />
-
-        <FinanceRunwayStrip summary={financeSummary} loading={financeLoading} />
 
         <View style={styles.tabBar}>
           {TABS.map((tab) => {
@@ -712,18 +654,12 @@ export default function HomeScreen() {
     ),
     [
       activeTab,
-      briefing,
-      briefingError,
-      briefingHidden,
-      briefingLoading,
-      handleDismissBriefing,
-      handleJumpToEmail,
-      handleToggleTask,
       tabCounts,
-      tasks,
-      tasksLoading,
-      financeSummary,
-      financeLoading,
+      playerStats,
+      avatarReplayToken,
+      stageDifficulty,
+      activeFolderCount,
+      activeFolderLabel,
     ],
   );
 
@@ -785,6 +721,8 @@ export default function HomeScreen() {
     async (notification: TriagedNotification) => {
       if (notification.sourceApp !== 'Email') {
         removeNotificationsFromFeed([notification.id]);
+        playDeleteSound();
+        await applyLocalDeletion(1);
         return;
       }
 
@@ -798,14 +736,22 @@ export default function HomeScreen() {
       }
 
       removeNotificationsFromFeed([notification.id]);
+      playDeleteSound();
+      if (result.playerStats) {
+        applyPlayerStats(result.playerStats);
+      } else {
+        await applyLocalDeletion(1);
+      }
     },
-    [removeNotificationsFromFeed],
+    [removeNotificationsFromFeed, playDeleteSound, applyPlayerStats, applyLocalDeletion],
   );
 
   const handleTrash = useCallback(
     async (notification: TriagedNotification) => {
       if (notification.sourceApp !== 'Email') {
         removeNotificationsFromFeed([notification.id]);
+        playDeleteSound();
+        await applyLocalDeletion(1);
         return;
       }
 
@@ -819,8 +765,14 @@ export default function HomeScreen() {
       }
 
       removeNotificationsFromFeed([notification.id]);
+      playDeleteSound();
+      if (result.playerStats) {
+        applyPlayerStats(result.playerStats);
+      } else {
+        await applyLocalDeletion(1);
+      }
     },
-    [removeNotificationsFromFeed],
+    [removeNotificationsFromFeed, playDeleteSound, applyPlayerStats, applyLocalDeletion],
   );
 
   const handleProcessFeed = useCallback(async () => {
@@ -855,7 +807,6 @@ export default function HomeScreen() {
           );
         });
 
-        void refreshBriefing(updated);
         return updated;
       });
       setDraftTexts((prev) => {
@@ -867,11 +818,14 @@ export default function HomeScreen() {
         }
         return next;
       });
+      if (results.size > 0) {
+        showActionComplete('SYNTHESIS COMPLETE!');
+      }
     } finally {
       setProcessing(false);
       setProgress(null);
     }
-  }, [notifications, refreshBriefing]);
+  }, [notifications, showActionComplete]);
 
   const handleSendReply = useCallback(
     async (notification: TriagedNotification, replyText: string) => {
@@ -886,11 +840,19 @@ export default function HomeScreen() {
               'Reply delivered, but Gmail archive failed. You can archive manually.',
             );
             removeNotificationsFromFeed([notification.id]);
+            showActionComplete('REPLY SENT!');
+            if (result.playerStats) {
+              applyPlayerStats(result.playerStats);
+            }
             return;
           }
         }
 
         removeNotificationsFromFeed([notification.id]);
+        showActionComplete('REPLY SENT!');
+        if (result.playerStats) {
+          applyPlayerStats(result.playerStats);
+        }
         return;
       }
 
@@ -899,7 +861,7 @@ export default function HomeScreen() {
         result.error ?? 'Could not send reply. Is the email relay running?',
       );
     },
-    [removeNotificationsFromFeed],
+    [removeNotificationsFromFeed, showActionComplete, applyPlayerStats],
   );
 
   const handleBulkSendAll = useCallback(async () => {
@@ -925,6 +887,7 @@ export default function HomeScreen() {
 
     const sentIds: string[] = [];
     const failed: string[] = [];
+    let latestPlayerStats: PlayerStats | undefined;
 
     try {
       for (const notification of sendable) {
@@ -936,6 +899,9 @@ export default function HomeScreen() {
         const result = await sendReply(notification, replyText);
         if (result.success) {
           sentIds.push(notification.id);
+          if (result.playerStats) {
+            latestPlayerStats = result.playerStats;
+          }
         } else {
           failed.push(notification.sender);
         }
@@ -950,17 +916,16 @@ export default function HomeScreen() {
           );
         }
         removeNotificationsFromFeed(sentIds);
+        showActionComplete('ALL REPLIES SENT!');
+        if (latestPlayerStats) {
+          applyPlayerStats(latestPlayerStats);
+        }
       }
 
       if (failed.length > 0) {
         Alert.alert(
           'Partial Send',
           `${sentIds.length} sent, ${failed.length} failed. Check relay connection and retry.`,
-        );
-      } else if (sentIds.length > 0) {
-        Alert.alert(
-          'All Drafts Sent',
-          `${sentIds.length} repl${sentIds.length === 1 ? 'y' : 'ies'} delivered and archived.`,
         );
       }
     } finally {
@@ -971,6 +936,8 @@ export default function HomeScreen() {
     bulkSending,
     draftTexts,
     removeNotificationsFromFeed,
+    showActionComplete,
+    applyPlayerStats,
   ]);
 
   const renderEmpty = () => (
@@ -997,7 +964,7 @@ export default function HomeScreen() {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.loadingState}>
-          <ActivityIndicator color="#5B8DEF" size="large" />
+          <ActivityIndicator color={arcadeColors.neonCyan} size="large" />
           <Text style={styles.loadingText}>Loading inbox…</Text>
         </View>
       </SafeAreaView>
@@ -1007,11 +974,16 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
+        <Pressable
+          style={({ pressed }) => [styles.menuButton, pressed && styles.menuButtonPressed]}
+          onPress={onOpenDrawer}
+          accessibilityLabel="Open side deck menu"
+        >
+          <ArcadeHamburgerIcon size={18} color={arcadeColors.neonCyan} />
+        </Pressable>
         <View style={styles.headerLeft}>
           <View style={styles.headerTitleWrap}>
-            <Text style={styles.headerTitle} numberOfLines={1} adjustsFontSizeToFit>
-              Shadow Inbox
-            </Text>
+            <ArcadeTitle />
           </View>
           <View style={styles.headerMeta}>
             <View style={styles.headerBadgeRow}>
@@ -1052,34 +1024,7 @@ export default function HomeScreen() {
           </View>
         </View>
         <View style={styles.headerActions}>
-          <VoiceNoteButton
-            accountKey={activeAccount}
-            compact
-            onIngested={() => {
-              void loadTasks();
-              void loadFinances();
-            }}
-          />
-          <Pressable
-            style={({ pressed }) => [
-              styles.headerUtilityPill,
-              pressed && styles.headerUtilityPillPressed,
-            ]}
-            onPress={() => setAutoPilotVisible(true)}
-            accessibilityLabel="Open auto-pilot rules"
-          >
-            <Text style={styles.headerUtilityEmoji}>🤖</Text>
-          </Pressable>
-          <Pressable
-            style={({ pressed }) => [
-              styles.headerUtilityPill,
-              pressed && styles.headerUtilityPillPressed,
-            ]}
-            onPress={() => setKnowledgeVisible(true)}
-            accessibilityLabel="Open core knowledge base"
-          >
-            <Text style={styles.headerUtilityEmoji}>🧠</Text>
-          </Pressable>
+          <VoiceNoteButton accountKey={activeAccount} compact />
           <Pressable
             style={({ pressed }) => [
               styles.headerUtilityPill,
@@ -1099,6 +1044,7 @@ export default function HomeScreen() {
               <Text style={styles.accountAvatarText}>{activeProfile.initials}</Text>
             </View>
           </Pressable>
+          <IconLegendMinimap embedded />
         </View>
       </View>
 
@@ -1135,40 +1081,7 @@ export default function HomeScreen() {
         onClose={() => setAccountSheetVisible(false)}
       />
 
-      <KnowledgeScreen
-        visible={knowledgeVisible}
-        onClose={() => setKnowledgeVisible(false)}
-      />
-
-      <AutoPilotScreen
-        visible={autoPilotVisible}
-        onClose={() => setAutoPilotVisible(false)}
-      />
-
-      {showBulkSend && (
-        <View style={styles.bulkBar}>
-          <Pressable
-            style={({ pressed }) => [
-              styles.bulkButton,
-              bulkSending && styles.bulkButtonDisabled,
-              pressed && !bulkSending && styles.bulkButtonPressed,
-            ]}
-            onPress={() => void handleBulkSendAll()}
-            disabled={bulkSending}
-          >
-            {bulkSending ? (
-              <ActivityIndicator color="#0D0F14" size="small" />
-            ) : (
-              <Ionicons name="paper-plane" size={16} color="#0D0F14" />
-            )}
-            <Text style={styles.bulkButtonText}>Approve & Send All Drafts</Text>
-            <View style={styles.bulkCountBadge}>
-              <Text style={styles.bulkCountText}>{actionRequiredItems.length}</Text>
-            </View>
-          </Pressable>
-        </View>
-      )}
-
+      <BossLevelPulseFrame active={bossLevelActive}>
       <FlatList
         ref={flatListRef}
         style={styles.feedList}
@@ -1197,21 +1110,51 @@ export default function HomeScreen() {
             actionBusy={bulkSending}
           />
         )}
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={[styles.listContent, { paddingBottom: listBottomPad }]}
         ListEmptyComponent={renderEmpty}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
             onRefresh={() => void onRefresh()}
-            tintColor="#5B8DEF"
-            colors={['#5B8DEF']}
-            progressBackgroundColor="#1A1D26"
+            tintColor={arcadeColors.neonCyan}
+            colors={[arcadeColors.neonCyan]}
+            progressBackgroundColor={arcadeColors.bgPanel}
             title="Refreshing inbox…"
-            titleColor="#6B7288"
+            titleColor={arcadeColors.textMuted}
           />
         }
       />
+      </BossLevelPulseFrame>
+
+      {showBulkSend && (
+        <View style={[styles.bulkBar, { paddingBottom: bulkBarBottomPad }]}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.bulkButton,
+              bulkSending && styles.bulkButtonDisabled,
+              pressed && !bulkSending && styles.bulkButtonPressed,
+            ]}
+            onPress={() => void handleBulkSendAll()}
+            disabled={bulkSending}
+            accessibilityLabel="Approve and send all drafts"
+          >
+            {bulkSending ? (
+              <ActivityIndicator color={arcadeColors.neonGreen} size="small" />
+            ) : (
+              <View style={styles.bulkIconWrap}>
+                <Ionicons name="rocket" size={14} color={arcadeColors.neonGreen} />
+              </View>
+            )}
+            <Text style={styles.bulkButtonText}>
+              APPROVE & SEND{'\n'}ALL DRAFTS
+            </Text>
+            <View style={styles.bulkCountBadge}>
+              <Text style={styles.bulkCountText}>{actionRequiredItems.length}</Text>
+            </View>
+          </Pressable>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -1219,7 +1162,7 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0D0F14',
+    backgroundColor: 'transparent',
   },
   loadingState: {
     flex: 1,
@@ -1228,16 +1171,32 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   loadingText: {
-    color: '#6B7288',
+    color: arcadeColors.textMuted,
     fontSize: 15,
+    fontFamily: arcadeFonts.body,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingTop: 8,
     paddingBottom: 8,
+    gap: 8,
+  },
+  menuButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: arcadeColors.bgPanel,
+    borderWidth: 2,
+    borderColor: arcadeColors.borderCyan,
+    flexShrink: 0,
+  },
+  menuButtonPressed: {
+    opacity: 0.85,
   },
   headerLeft: {
     flex: 1,
@@ -1264,12 +1223,12 @@ const styles = StyleSheet.create({
   headerUtilityPill: {
     width: 40,
     height: 40,
-    borderRadius: 20,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#161922',
-    borderWidth: 1,
-    borderColor: 'rgba(167, 139, 250, 0.35)',
+    backgroundColor: arcadeColors.bgPanel,
+    borderWidth: 2,
+    borderColor: arcadeColors.borderCyan,
   },
   headerUtilityPillPressed: {
     opacity: 0.85,
@@ -1344,45 +1303,45 @@ const styles = StyleSheet.create({
   lastCheckedBadge: {
     paddingHorizontal: 10,
     paddingVertical: 5,
-    borderRadius: 20,
-    backgroundColor: '#161922',
+    borderRadius: 4,
+    backgroundColor: arcadeColors.bgPanel,
     borderWidth: 1,
-    borderColor: '#2A3142',
+    borderColor: arcadeColors.borderMuted,
   },
   lastCheckedText: {
-    color: '#8B93A8',
-    fontSize: 11,
+    color: arcadeColors.textMuted,
+    fontSize: 10,
+    fontFamily: arcadeFonts.body,
     fontWeight: '600',
-  },
-  headerTitle: {
-    color: '#FFFFFF',
-    fontSize: 22,
-    fontWeight: '600',
-    letterSpacing: -0.3,
   },
   headerSubtitle: {
-    color: '#6B7288',
-    fontSize: 14,
+    color: arcadeColors.textMuted,
+    fontSize: 12,
+    fontFamily: arcadeFonts.body,
     marginTop: 4,
   },
   processButton: {
-    backgroundColor: '#5B8DEF',
+    backgroundColor: arcadeColors.bgPanelElevated,
     paddingHorizontal: 16,
     paddingVertical: 10,
-    borderRadius: 10,
+    borderRadius: 4,
     alignItems: 'center',
+    borderWidth: 2,
+    borderColor: arcadeColors.borderPink,
   },
   processButtonDisabled: {
-    backgroundColor: '#2A3142',
+    backgroundColor: arcadeColors.bgPanel,
+    borderColor: arcadeColors.borderMuted,
     opacity: 0.6,
   },
   processButtonPressed: {
     opacity: 0.85,
   },
   processButtonText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '700',
+    color: arcadeColors.neonPink,
+    fontSize: 10,
+    fontFamily: arcadeFonts.pixel,
+    letterSpacing: 0.5,
   },
   processingRow: {
     flexDirection: 'row',
@@ -1390,46 +1349,87 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   bulkBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     paddingHorizontal: 16,
-    marginBottom: 12,
+    paddingTop: 10,
+    backgroundColor: 'rgba(3, 8, 18, 0.96)',
+    borderTopWidth: 2,
+    borderTopColor: 'rgba(102, 255, 153, 0.35)',
+    shadowColor: arcadeColors.neonGreen,
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 12,
   },
   bulkButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    backgroundColor: '#6EE7A0',
-    borderRadius: 12,
-    paddingVertical: 13,
-    paddingHorizontal: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(110, 231, 160, 0.45)',
+    gap: 10,
+    backgroundColor: arcadeColors.bgPanel,
+    borderRadius: arcadeRadii.sm,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderWidth: 2,
+    borderColor: 'rgba(102, 255, 153, 0.55)',
+    shadowColor: arcadeColors.neonGreen,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.45,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  bulkIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: arcadeRadii.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: arcadeColors.bgPanelElevated,
+    borderWidth: 2,
+    borderColor: arcadeColors.borderMuted,
   },
   bulkButtonDisabled: {
-    opacity: 0.65,
+    opacity: 0.55,
   },
   bulkButtonPressed: {
     opacity: 0.88,
+    transform: [{ scale: 0.98 }],
   },
   bulkButtonText: {
-    color: '#0D0F14',
-    fontSize: 14,
-    fontWeight: '800',
-    letterSpacing: 0.2,
+    flex: 1,
+    color: arcadeColors.neonGreen,
+    fontSize: 8,
+    fontFamily: arcadeFonts.pixel,
+    letterSpacing: 0.6,
+    lineHeight: 12,
+    textAlign: 'center',
+    textShadowColor: 'rgba(102, 255, 153, 0.35)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 6,
   },
   bulkCountBadge: {
-    minWidth: 22,
-    height: 22,
-    borderRadius: 11,
+    minWidth: 26,
+    height: 26,
+    borderRadius: arcadeRadii.sm,
     paddingHorizontal: 6,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(13, 15, 20, 0.12)',
+    backgroundColor: arcadeColors.bgPanelElevated,
+    borderWidth: 2,
+    borderColor: arcadeColors.neonPink,
+    shadowColor: arcadeColors.neonPink,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.4,
+    shadowRadius: 4,
+    elevation: 3,
   },
   bulkCountText: {
-    color: '#0D0F14',
-    fontSize: 11,
-    fontWeight: '800',
+    color: arcadeColors.neonPink,
+    fontSize: 9,
+    fontFamily: arcadeFonts.pixel,
   },
   tabBar: {
     flexDirection: 'row',
@@ -1438,46 +1438,55 @@ const styles = StyleSheet.create({
   },
   tab: {
     flex: 1,
+    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
+    gap: 4,
     paddingVertical: 10,
-    borderRadius: 10,
-    backgroundColor: '#161922',
-    borderWidth: 1,
-    borderColor: '#232836',
+    paddingHorizontal: 4,
+    borderRadius: 4,
+    backgroundColor: arcadeColors.tabInactive,
+    borderWidth: 2,
+    borderColor: arcadeColors.borderMuted,
   },
   tabActive: {
-    backgroundColor: '#1E2433',
-    borderColor: '#5B8DEF',
+    backgroundColor: arcadeColors.tabActive,
+    borderColor: arcadeColors.borderCyan,
   },
   tabLabel: {
-    color: '#6B7288',
-    fontSize: 12,
-    fontWeight: '600',
+    flexShrink: 1,
+    color: arcadeColors.textDim,
+    fontSize: 7,
+    lineHeight: 10,
+    fontFamily: arcadeFonts.pixel,
+    textAlign: 'center',
   },
   tabLabelActive: {
-    color: '#FFFFFF',
+    color: arcadeColors.neonCyan,
   },
   tabBadge: {
-    backgroundColor: '#2A3142',
+    backgroundColor: arcadeColors.bgPanelElevated,
     paddingHorizontal: 7,
     paddingVertical: 2,
-    borderRadius: 10,
+    borderRadius: 4,
     minWidth: 22,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: arcadeColors.borderMuted,
   },
   tabBadgeActive: {
-    backgroundColor: '#5B8DEF',
+    backgroundColor: arcadeColors.neonPink,
+    borderColor: arcadeColors.neonPink,
   },
   tabBadgeText: {
-    color: '#8B93A8',
-    fontSize: 11,
+    color: arcadeColors.textMuted,
+    fontSize: 9,
+    fontFamily: arcadeFonts.body,
     fontWeight: '700',
   },
   tabBadgeTextActive: {
-    color: '#FFFFFF',
+    color: arcadeColors.bgDeep,
   },
   listContent: {
     paddingHorizontal: 16,

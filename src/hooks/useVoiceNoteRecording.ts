@@ -8,6 +8,18 @@ import {
   useAudioRecorderState,
 } from 'expo-audio';
 
+async function safeStopRecording(
+  recorder: ReturnType<typeof useAudioRecorder>,
+  isRecording: boolean,
+) {
+  if (!isRecording) return;
+  try {
+    await recorder.stop();
+  } catch {
+    // Native recorder may already be released during screen transitions.
+  }
+}
+
 export function useVoiceNoteRecording() {
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recorderState = useAudioRecorderState(recorder);
@@ -58,11 +70,8 @@ export function useVoiceNoteRecording() {
     return () => {
       cancelled = true;
       pulseLoopRef.current?.stop();
-      if (recorder.isRecording) {
-        void recorder.stop();
-      }
     };
-  }, [recorder]);
+  }, []);
 
   useEffect(() => {
     if (recorderState.isRecording) {
@@ -95,7 +104,7 @@ export function useVoiceNoteRecording() {
       return recorder.uri ?? null;
     }
 
-    await recorder.stop();
+    await safeStopRecording(recorder, true);
     return recorder.uri ?? null;
   }, [recorder, recorderState.isRecording]);
 

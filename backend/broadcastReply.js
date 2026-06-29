@@ -3,6 +3,7 @@ const { getAccount, resolveAccountKey } = require('./accounts');
 const { getOAuthAccount } = require('./userTokens');
 const { getValidAccessToken } = require('./googleOAuth');
 const { readNotifications } = require('./notificationFeed');
+const { sendGmailMessage, resolveGmailMessageId } = require('./gmailApi');
 
 function parseRecipientEmail(sender) {
   const angleMatch = String(sender || '').match(/<([^>]+@[^>]+)>/);
@@ -63,18 +64,48 @@ async function sendEmailReply(accountKey, notification, replyText) {
     throw new Error('Could not parse a recipient email from this notification.');
   }
 
-  const transporter = await createEmailTransporter(accountKey);
   const account = getAccount(resolveAccountKey(accountKey));
+  const subject = buildReplySubject(notification.rawText);
+  const trimmed = replyText.trim();
+
+  if (account.oauth) {
+    let gmailApiMessageId = notification.gmailApiMessageId || null;
+    if (!gmailApiMessageId) {
+      gmailApiMessageId = await resolveGmailMessageId(accountKey, {
+        messageIdHeader: notification.messageIdHeader,
+        subject: parseSubject(notification.rawText),
+        timestamp: notification.timestamp,
+      });
+    }
+
+    const result = await sendGmailMessage(accountKey, {
+      to: recipient,
+      subject,
+      body: trimmed,
+      inReplyTo: notification.messageIdHeader,
+      gmailApiMessageId,
+    });
+
+    return {
+      platform: 'email',
+      messageId: result.id,
+      threadId: result.threadId || null,
+      transport: 'gmail_api',
+    };
+  }
+
+  const transporter = await createEmailTransporter(accountKey);
   const info = await transporter.sendMail({
     from: account.smtp.user || account.email,
     to: recipient,
-    subject: buildReplySubject(notification.rawText),
-    text: replyText.trim(),
+    subject,
+    text: trimmed,
   });
 
   return {
     platform: 'email',
     messageId: info.messageId,
+    transport: 'smtp',
   };
 }
 

@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "index.ts",
   "dependencies": {
+    "@expo-google-fonts/press-start-2p": "^0.4.1",
     "@expo/vector-icons": "15.0.3",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-google-signin/google-signin": "^16.1.2",
@@ -57,6 +58,7 @@
     "email-relay": "node scripts/syncKnowledgeBase.js && node scripts/emailRelay.js",
     "fetch-daemon": "node scripts/syncKnowledgeBase.js && node scripts/fetchDaemon.js",
     "sync:knowledge-base": "node scripts/syncKnowledgeBase.js",
+    "generate:retro-sounds": "node scripts/generateRetroSounds.js",
     "google:oauth-config": "node scripts/printGoogleOAuthConfig.js",
     "prestart": "node scripts/syncKnowledgeBase.js",
     "dev:backend": "concurrently --names relay,daemon --prefix-colors blue,magenta \"npm run email-relay\" \"npm run fetch-daemon\"",

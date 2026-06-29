@@ -33,7 +33,7 @@ module.exports = {
     orientation: 'portrait',
     icon: './assets/icon.png',
     scheme: 'shadow-inbox',
-    userInterfaceStyle: 'light',
+    userInterfaceStyle: 'dark',
     ios: {
       bundleIdentifier: 'com.saintjeromeiii.shadowinbox',
       supportsTablet: true,

@@ -20,13 +20,22 @@ import {
   toggleAutoPilotRule,
 } from '../services/autoPilotService';
 import type { AutoPilotHistoryEntry, AutoPilotRule } from '../types/autoPilot';
+import { ArcadeComputerIcon, ArcadeHamburgerIcon, ArcadeRobotIcon } from '../components/ArcadeIcons';
+import { arcadeColors, arcadeFonts } from '../theme/arcadeTheme';
 
 interface AutoPilotScreenProps {
   visible: boolean;
   onClose: () => void;
+  variant?: 'modal' | 'screen';
+  onOpenDrawer?: () => void;
 }
 
-export default function AutoPilotScreen({ visible, onClose }: AutoPilotScreenProps) {
+export default function AutoPilotScreen({
+  visible,
+  onClose,
+  variant = 'modal',
+  onOpenDrawer,
+}: AutoPilotScreenProps) {
   const [rules, setRules] = useState<AutoPilotRule[]>([]);
   const [history, setHistory] = useState<AutoPilotHistoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -74,16 +83,23 @@ export default function AutoPilotScreen({ visible, onClose }: AutoPilotScreenPro
     }
   };
 
-  return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+  const content = (
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.header}>
-          <View>
-            <Text style={styles.title}>🤖 Auto-Pilot</Text>
-            <Text style={styles.subtitle}>Automated rules engine</Text>
+          {variant === 'screen' && onOpenDrawer ? (
+            <Pressable style={styles.menuButton} onPress={onOpenDrawer}>
+              <ArcadeHamburgerIcon size={18} color={arcadeColors.neonCyan} />
+            </Pressable>
+          ) : null}
+          <View style={styles.headerTitleRow}>
+            <ArcadeComputerIcon size={22} color={arcadeColors.neonCyan} />
+            <View>
+              <Text style={styles.title}>AUTO-PILOT</Text>
+              <Text style={styles.subtitle}>Automated rules engine</Text>
+            </View>
           </View>
           <Pressable style={styles.closeButton} onPress={onClose}>
-            <Ionicons name="close" size={22} color="#D0D5E0" />
+            <Ionicons name="close" size={22} color={arcadeColors.neonCyan} />
           </Pressable>
         </View>
 
@@ -100,7 +116,10 @@ export default function AutoPilotScreen({ visible, onClose }: AutoPilotScreenPro
           >
             {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-            <Text style={styles.sectionTitle}>🤖 Auto-Pilot Active Rules</Text>
+            <View style={styles.sectionTitleRow}>
+              <ArcadeRobotIcon size={16} color={arcadeColors.neonCyan} />
+              <Text style={styles.sectionTitle}>AUTO-PILOT ACTIVE RULES</Text>
+            </View>
             <Text style={styles.sectionHint}>
               Matched messages are replied to, tasks closed, and removed from your inbox automatically.
             </Text>
@@ -136,8 +155,8 @@ export default function AutoPilotScreen({ visible, onClose }: AutoPilotScreenPro
               ))}
             </View>
 
-            <Text style={[styles.sectionTitle, styles.historyTitle]}>
-              Live Automation History
+            <Text style={[styles.sectionTitleStandalone, styles.historyTitle]}>
+              LIVE AUTOMATION HISTORY
             </Text>
             <Text style={styles.sectionHint}>
               Rolling ledger of what Auto-Pilot handled today.
@@ -174,6 +193,16 @@ export default function AutoPilotScreen({ visible, onClose }: AutoPilotScreenPro
           </ScrollView>
         )}
       </SafeAreaView>
+  );
+
+  if (variant === 'screen') {
+    if (!visible) return null;
+    return content;
+  }
+
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      {content}
     </Modal>
   );
 }
@@ -181,7 +210,7 @@ export default function AutoPilotScreen({ visible, onClose }: AutoPilotScreenPro
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0D0F14',
+    backgroundColor: arcadeColors.bgDeep,
   },
   header: {
     flexDirection: 'row',
@@ -190,28 +219,47 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 8,
     paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1E2433',
+    borderBottomWidth: 2,
+    borderBottomColor: arcadeColors.borderMuted,
+    gap: 10,
+  },
+  menuButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: arcadeColors.bgPanel,
+    borderWidth: 2,
+    borderColor: arcadeColors.borderCyan,
+  },
+  headerTitleRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
   title: {
-    color: '#FFFFFF',
-    fontSize: 24,
-    fontWeight: '800',
+    color: arcadeColors.neonCyan,
+    fontFamily: arcadeFonts.pixel,
+    fontSize: 10,
+    letterSpacing: 0.5,
   },
   subtitle: {
-    color: '#6B7288',
-    fontSize: 13,
+    color: arcadeColors.textMuted,
+    fontSize: 12,
+    fontFamily: arcadeFonts.body,
     marginTop: 2,
   },
   closeButton: {
     width: 40,
     height: 40,
-    borderRadius: 20,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#161922',
+    backgroundColor: arcadeColors.bgPanel,
     borderWidth: 1,
-    borderColor: '#2A3142',
+    borderColor: arcadeColors.borderCyan,
   },
   loadingState: {
     flex: 1,
@@ -236,11 +284,27 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginBottom: 8,
   },
-  sectionTitle: {
-    color: '#F4F6FB',
-    fontSize: 17,
-    fontWeight: '800',
+  sectionTitleStandalone: {
+    color: arcadeColors.neonCyan,
+    fontFamily: arcadeFonts.pixel,
+    fontSize: 8,
+    lineHeight: 12,
+    letterSpacing: 0.3,
     marginTop: 4,
+  },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 4,
+  },
+  sectionTitle: {
+    flex: 1,
+    color: arcadeColors.neonPink,
+    fontFamily: arcadeFonts.pixel,
+    fontSize: 8,
+    lineHeight: 12,
+    letterSpacing: 0.3,
   },
   sectionHint: {
     color: '#6B7288',
