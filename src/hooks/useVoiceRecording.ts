@@ -5,7 +5,28 @@ import {
   requestRecordingPermissionsAsync,
   setAudioModeAsync,
   useAudioRecorder,
+  type AudioRecorder,
 } from 'expo-audio';
+
+function isRecorderActive(recorder: AudioRecorder): boolean {
+  try {
+    return recorder.isRecording;
+  } catch {
+    return false;
+  }
+}
+
+async function safeStopRecording(recorder: AudioRecorder): Promise<void> {
+  if (!isRecorderActive(recorder)) {
+    return;
+  }
+
+  try {
+    await recorder.stop();
+  } catch {
+    // Native recorder may already be released during list unmounts.
+  }
+}
 
 export function useVoiceRecording() {
   const [isRecording, setIsRecording] = useState(false);
@@ -40,9 +61,7 @@ export function useVoiceRecording() {
   useEffect(() => {
     return () => {
       pulseLoopRef.current?.stop();
-      if (recorder.isRecording) {
-        void recorder.stop();
-      }
+      void safeStopRecording(recorder);
     };
   }, [recorder]);
 
@@ -66,13 +85,17 @@ export function useVoiceRecording() {
   }, [recorder, startPulse]);
 
   const stopRecording = useCallback(async (): Promise<string | null> => {
-    if (!recorder.isRecording) {
+    if (!isRecorderActive(recorder)) {
+      setIsRecording(false);
+      stopPulse();
       return null;
     }
 
     try {
       await recorder.stop();
-      return recorder.uri;
+      return recorder.uri ?? null;
+    } catch {
+      return null;
     } finally {
       setIsRecording(false);
       stopPulse();
@@ -81,14 +104,8 @@ export function useVoiceRecording() {
   }, [recorder, stopPulse]);
 
   const cancelRecording = useCallback(async () => {
-    if (!recorder.isRecording) {
-      return;
-    }
-
     try {
-      await recorder.stop();
-    } catch {
-      // ignore
+      await safeStopRecording(recorder);
     } finally {
       setIsRecording(false);
       stopPulse();

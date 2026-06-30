@@ -16,7 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import type { TriagedNotification } from '../types/notification';
-import { useVoiceRecording } from '../hooks/useVoiceRecording';
+import type { FeedVoiceRecordingControl } from '../hooks/useFeedVoiceRecording';
 import { SOURCE_COLORS, SOURCE_LABELS, SOURCE_PILL_EMOJI } from '../constants/sourceStyles';
 import {
   formatShadowLabelName,
@@ -56,6 +56,7 @@ interface FeedCardProps {
     audioUri: string,
     currentDraft: string,
   ) => Promise<string>;
+  voiceControl: FeedVoiceRecordingControl;
   isRemoving?: boolean;
   actionBusy?: boolean;
 }
@@ -155,6 +156,7 @@ export default function FeedCard({
   onSendReply,
   onRedraft,
   onVoiceCommand,
+  voiceControl,
   isRemoving = false,
   actionBusy = false,
 }: FeedCardProps) {
@@ -173,12 +175,10 @@ export default function FeedCard({
     null,
   );
   const [quickReplySending, setQuickReplySending] = useState(false);
-  const {
-    isRecording,
-    pulseAnim,
-    startRecording,
-    stopRecording,
-  } = useVoiceRecording();
+  const isRecording =
+    voiceControl.isRecording &&
+    voiceControl.recordingNotificationId === notification.id;
+  const { pulseAnim, startRecording, stopRecording } = voiceControl;
   const replyInputRef = useRef<TextInput>(null);
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const triage = notification.triage;
@@ -327,7 +327,7 @@ export default function FeedCard({
       }
 
       try {
-        await startRecording();
+        await startRecording(notification.id);
         await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       } catch (error) {
         Alert.alert(

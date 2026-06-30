@@ -39,6 +39,7 @@ import { useAccount } from '../context/AccountContext';
 import AccountSwitcherSheet from '../components/AccountSwitcherSheet';
 import VoiceNoteButton from '../components/VoiceNoteButton';
 import { useGoogleSignIn } from '../hooks/useGoogleSignIn';
+import { useFeedVoiceRecording } from '../hooks/useFeedVoiceRecording';
 import { removeRelayAccount } from '../services/authService';
 import { hideAccountOnDevice, unhideAccountOnDevice } from '../services/accountStorage';
 import type { AccountKey } from '../types/account';
@@ -143,6 +144,7 @@ export default function HomeScreen({
     refreshAccounts,
     setActiveAccount,
   } = useAccount();
+  const feedVoiceControl = useFeedVoiceRecording();
   const [notifications, setNotifications] = useState<TriagedNotification[]>([]);
   const [activeTab, setActiveTab] = useState<FeedTab>('action_required');
   const [processing, setProcessing] = useState(false);
@@ -1103,6 +1105,7 @@ export default function HomeScreen({
             onDraftChange={handleDraftChange}
             onRedraft={handleRedraft}
             onVoiceCommand={handleVoiceCommand}
+            voiceControl={feedVoiceControl}
             onGmailArchive={handleGmailArchive}
             onTrash={handleTrash}
             onSendReply={handleSendReply}
