@@ -191,36 +191,68 @@ function renderDeleteSolarBeam() {
   return concatSegments([charge, beam, tail]);
 }
 
-/** Grid Stalker intro — servo inhale / vent exhale breathing loop */
-function renderRobotIntroBreath() {
-  const inhaleA = renderTone({
-    frequency: 110,
-    durationSec: 0.18,
-    volume: 0.18,
-    wave: 'sine',
+/** Grid Stalker intro — gear mesh, ratchet clicks, servo sweep */
+function renderRobotIntroGears() {
+  const whirCount = Math.floor(SAMPLE_RATE * 0.38);
+  const whir = new Float32Array(whirCount);
+  for (let i = 0; i < whirCount; i += 1) {
+    const t = i / SAMPLE_RATE;
+    const freq = 85 + t * 320;
+    const mesh = Math.sign(Math.sin(2 * Math.PI * freq * t));
+    const wobble = 0.18 + 0.12 * Math.sin(2 * Math.PI * 14 * t);
+    whir[i] = mesh * wobble * 0.22;
+  }
+
+  function gearClick(frequency, durationSec, volume) {
+    return concatSegments([
+      renderTone({
+        frequency,
+        durationSec,
+        volume,
+        wave: 'square',
+      }),
+      renderNoiseBurst(0.018, volume * 0.45),
+    ]);
+  }
+
+  const gap = (sec) => new Float32Array(Math.floor(SAMPLE_RATE * sec));
+
+  const ratchet = concatSegments([
+    gap(0.05),
+    gearClick(380, 0.028, 0.3),
+    gap(0.055),
+    gearClick(480, 0.026, 0.34),
+    gap(0.045),
+    gearClick(610, 0.024, 0.32),
+    gap(0.04),
+    gearClick(520, 0.022, 0.28),
+  ]);
+
+  const servoCount = Math.floor(SAMPLE_RATE * 0.14);
+  const servo = new Float32Array(servoCount);
+  for (let i = 0; i < servoCount; i += 1) {
+    const t = i / SAMPLE_RATE;
+    const freq = 520 + t * 1100;
+    const envelope = Math.exp(-t * 7) * 0.2;
+    servo[i] = Math.sin(2 * Math.PI * freq * t) * envelope;
+  }
+
+  const piston = renderTone({
+    frequency: 140,
+    durationSec: 0.1,
+    volume: 0.24,
+    wave: 'square',
   });
-  const inhaleB = renderTone({
-    frequency: 185,
-    durationSec: 0.16,
+  const hiss = renderNoiseBurst(0.09, 0.11);
+  const settle = renderTone({
+    frequency: 96,
+    durationSec: 0.12,
     volume: 0.14,
     wave: 'sine',
   });
-  const servo = renderTone({
-    frequency: 780,
-    durationSec: 0.05,
-    volume: 0.12,
-    wave: 'square',
-  });
-  const vent = renderNoiseBurst(0.12, 0.14);
-  const release = renderTone({
-    frequency: 92,
-    durationSec: 0.18,
-    volume: 0.16,
-    wave: 'sine',
-  });
-  const gap = new Float32Array(Math.floor(SAMPLE_RATE * 0.22));
+  const tail = gap(0.2);
 
-  return concatSegments([inhaleA, inhaleB, servo, vent, release, gap]);
+  return concatSegments([whir, ratchet, servo, piston, hiss, settle, tail]);
 }
 
 /** Neon Warden intro — double heartbeat + stance-up surge */
@@ -271,7 +303,7 @@ writeWav(path.join(OUT_DIR, 'delete_action.wav'), renderDeleteAction());
 writeWav(path.join(OUT_DIR, 'delete_punch.wav'), renderDeletePunch());
 writeWav(path.join(OUT_DIR, 'delete_wrench.wav'), renderDeleteWrench());
 writeWav(path.join(OUT_DIR, 'delete_solar_beam.wav'), renderDeleteSolarBeam());
-writeWav(path.join(OUT_DIR, 'robot_intro_breath.wav'), renderRobotIntroBreath());
+writeWav(path.join(OUT_DIR, 'robot_intro_gears.wav'), renderRobotIntroGears());
 writeWav(path.join(OUT_DIR, 'warden_intro_pulse.wav'), renderWardenIntroPulse());
 writeWav(path.join(OUT_DIR, 'quantum_intro_hum.wav'), renderQuantumIntroHum());
 writeWav(path.join(OUT_DIR, 'action_complete.wav'), renderActionComplete());

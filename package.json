@@ -1,6 +1,9 @@
 {
   "name": "shadow-inbox",
   "version": "1.0.0",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "main": "index.ts",
   "dependencies": {
     "@expo-google-fonts/press-start-2p": "^0.4.1",

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Platform } from 'react-native';
+import { Alert, AppState, Platform } from 'react-native';
 import {
   GoogleSignin,
   isErrorWithCode,
@@ -26,6 +26,41 @@ function isPlaceholderClientId(value: string): boolean {
 }
 
 const GMAIL_SCOPES = [...GOOGLE_OAUTH_SCOPES];
+
+function isRelayNetworkError(message: string): boolean {
+  return /cannot reach the backend|network request failed|timed out|failed to fetch/i.test(
+    message,
+  );
+}
+
+function waitForAppActive(): Promise<void> {
+  if (AppState.currentState === 'active') {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        subscription.remove();
+        resolve();
+      }
+    });
+  });
+}
+
+async function exchangeAuthCodeWithRetry(input: {
+  code: string;
+  clientId: string;
+  clientType: 'web';
+}) {
+  let result = await exchangeGoogleAuthCode(input);
+  if (result.success || !result.error || !isRelayNetworkError(result.error)) {
+    return result;
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  return exchangeGoogleAuthCode(input);
+}
 
 interface UseGoogleSignInOptions {
   onSuccess?: (account: AccountProfile) => void | Promise<void>;
@@ -78,7 +113,7 @@ export function useGoogleSignIn(options: UseGoogleSignInOptions = {}) {
       if (!relayReady) {
         Alert.alert(
           'Email Relay Offline',
-          `Shadow Inbox could not reach the cloud backend at ${getRelayUrl()}. Confirm Railway is deployed and healthy, then try again.`,
+          `Shadow Inbox could not reach ${getRelayUrl()}/health from this device.\n\nOpen that link in Chrome on your phone. If it fails, check Wi‑Fi or cellular. If it works, retry sign-in.`,
         );
         return;
       }
@@ -99,7 +134,10 @@ export function useGoogleSignIn(options: UseGoogleSignInOptions = {}) {
         return;
       }
 
-      const result = await exchangeGoogleAuthCode({
+      await waitForAppActive();
+      await new Promise((resolve) => setTimeout(resolve, 400));
+
+      const result = await exchangeAuthCodeWithRetry({
         code: serverAuthCode,
         clientId: webClientId,
         clientType: 'web',

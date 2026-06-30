@@ -141,6 +141,24 @@ app.post(
 );
 app.use(express.json({ limit: '1mb' }));
 
+function requireAdminAuth(req, res, next) {
+  const adminSecret = process.env.ADMIN_SECRET;
+
+  if (!adminSecret) {
+    console.error('[Security] ADMIN_SECRET variable is missing in environment setup!');
+    return res.status(500).json({ error: 'Security configuration error.' });
+  }
+
+  const clientToken = req.headers['x-admin-token'];
+
+  if (!clientToken || clientToken !== adminSecret) {
+    console.warn(`[Security Alert] Blocked unauthorized admin access from IP: ${req.ip}`);
+    return res.status(401).json({ error: 'Unauthorized access.' });
+  }
+
+  next();
+}
+
 function mountApiRouters(expressApp) {
   expressApp.use('/api/knowledge', knowledgeRouter);
   expressApp.use('/api/calendar', calendarRouter);
@@ -155,7 +173,7 @@ function mountApiRouters(expressApp) {
   expressApp.use('/api/firewall', firewallRouter);
   expressApp.use('/api/replies', repliesRouter);
   expressApp.use('/api/user', userRouter);
-  expressApp.use('/api/admin', adminRouter);
+  expressApp.use('/api/admin', requireAdminAuth, adminRouter);
 }
 
 mountApiRouters(app);

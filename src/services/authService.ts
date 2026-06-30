@@ -80,12 +80,18 @@ export async function exchangeGoogleAuthCode(input: {
   clientId?: string;
   clientType?: GoogleOAuthClientType;
 }): Promise<GoogleAuthCallbackResult> {
+  const OAUTH_TIMEOUT_MS = 45_000;
+
   try {
-    const response = await relayFetch('/api/auth/google/callback', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
-    });
+    const response = await relayFetch(
+      '/api/auth/google/callback',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      },
+      OAUTH_TIMEOUT_MS,
+    );
 
     const data = await parseRelayJson<GoogleAuthCallbackResult & { error?: string }>(
       response,

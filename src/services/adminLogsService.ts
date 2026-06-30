@@ -6,6 +6,18 @@ import type {
   AutomationLogStatusFilter,
 } from '../types/automationLog';
 
+function adminRequestHeaders(
+  accountKey: AccountKey,
+  extra: Record<string, string> = {},
+): Record<string, string> {
+  const adminToken = process.env.EXPO_PUBLIC_ADMIN_TOKEN ?? '';
+  return {
+    ...extra,
+    'X-Account-Key': accountKey,
+    ...(adminToken ? { 'X-Admin-Token': adminToken } : {}),
+  };
+}
+
 async function parseRelayJson<T extends { error?: string }>(
   response: Response,
 ): Promise<T> {
@@ -51,7 +63,7 @@ export async function fetchAutomationLogs(
 
   const response = await relayFetch(`/api/admin/logs?${params.toString()}`, {
     method: 'GET',
-    headers: { 'X-Account-Key': accountKey },
+    headers: adminRequestHeaders(accountKey),
   });
 
   const data = await parseRelayJson<{ logs?: AutomationLog[]; error?: string }>(response);
@@ -73,10 +85,9 @@ export async function replayAutomationLog(
 }> {
   const response = await relayFetch(`/api/admin/logs/${encodeURIComponent(logId)}/retry`, {
     method: 'POST',
-    headers: {
+    headers: adminRequestHeaders(accountKey, {
       'Content-Type': 'application/json',
-      'X-Account-Key': accountKey,
-    },
+    }),
     body: JSON.stringify({ accountKey }),
   });
 

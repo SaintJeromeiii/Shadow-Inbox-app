@@ -117,8 +117,9 @@ export function formatRelayConnectionError(error?: unknown): string {
   if (isNetworkFailure) {
     return [
       `Cannot reach the backend at ${getRelayUrl()}.`,
-      'Confirm EXPO_PUBLIC_EMAIL_RELAY_URL is set to your live relay URL,',
-      'then restart Expo: npx expo start -c',
+      'On your phone, open that URL in Chrome (/health should return JSON).',
+      'If the browser works, retry sign-in; if not, check Wi‑Fi or cellular data.',
+      'Confirm EXPO_PUBLIC_EMAIL_RELAY_URL in .env, then rebuild: npx expo run:android --device',
     ].join(' ');
   }
 
@@ -142,7 +143,7 @@ export async function checkRelayHealth(): Promise<boolean> {
     const response = await fetchWithTimeout(
       `${getRelayUrl()}/health`,
       { method: 'GET' },
-      8000,
+      15_000,
     );
     return response.ok;
   } catch {

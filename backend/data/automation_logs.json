@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "logs": [
+    {
+      "id": "d29d2d73-08b9-451c-9bc4-fcffba3d8bef",
+      "messageId": "slack--unknown-test_unique_msg_1001",
+      "accountKey": "personal",
+      "eventType": "inbound_webhook",
+      "status": "completed",
+      "errorMessage": null,
+      "retryCount": 0,
+      "payload": {
+        "accountKey": "personal"
+      },
+      "resultPayload": {
+        "ingested": 1,
+        "total": 16,
+        "blocked": 0
+      },
+      "createdAt": "2026-06-30T17:16:03.983Z",
+      "updatedAt": "2026-06-30T17:16:08.275Z"
+    },
+    {
+      "id": "df0ad0a7-90a5-4af0-9156-c48a76287038",
+      "messageId": "slack-test-1",
+      "accountKey": "personal",
+      "eventType": "inbound_webhook",
+      "status": "completed",
+      "errorMessage": null,
+      "retryCount": 0,
+      "payload": {
+        "accountKey": "personal"
+      },
+      "resultPayload": {
+        "ingested": 1,
+        "total": 1
+      },
+      "createdAt": "2026-06-30T15:57:42.128Z",
+      "updatedAt": "2026-06-30T15:57:42.130Z"
+    }
+  ]
+}

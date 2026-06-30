@@ -61,28 +61,38 @@ function AvatarIntroVideo({
   }, [sessionId]);
 
   useEffect(() => {
+    let active = true;
     introSoundActiveRef.current = false;
 
     const playingSubscription = player.addListener('playingChange', ({ isPlaying }) => {
-      if (isPlaying && !introSoundActiveRef.current) {
-        introSoundActiveRef.current = true;
-        void startCharacterIntroAmbience(characterId, sessionId);
+      if (!active || !isPlaying || introSoundActiveRef.current) {
+        return;
       }
+
+      introSoundActiveRef.current = true;
+      void startCharacterIntroAmbience(characterId, sessionId);
     });
 
     const endSubscription = player.addListener('playToEnd', () => {
+      if (!active) {
+        return;
+      }
+
       stopIntroSound();
-      player.pause();
       onEnd();
     });
 
-    player.currentTime = 0;
-    player.play();
+    try {
+      player.currentTime = 0;
+      player.play();
+    } catch {
+      // useVideoPlayer may already have released the native player during unmount.
+    }
 
     return () => {
+      active = false;
       playingSubscription.remove();
       endSubscription.remove();
-      player.pause();
       stopIntroSound();
     };
   }, [player, characterId, sessionId, onEnd, stopIntroSound]);
@@ -93,7 +103,7 @@ function AvatarIntroVideo({
       style={[styles.media, styles.mediaOverlay, pixelatedImageStyle]}
       contentFit="contain"
       nativeControls={false}
-      allowsFullscreen={false}
+      fullscreenOptions={{ enable: false }}
       accessibilityLabel="Character intro video"
     />
   );

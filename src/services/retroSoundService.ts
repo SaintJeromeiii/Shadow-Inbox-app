@@ -7,7 +7,7 @@ type RetroSoundKey =
   | 'deletePunch'
   | 'deleteWrench'
   | 'deleteSolarBeam'
-  | 'robotIntroBreath'
+  | 'robotIntroGears'
   | 'wardenIntroPulse'
   | 'quantumIntroHum'
   | 'actionComplete'
@@ -18,7 +18,7 @@ const SOUND_ASSETS: Record<RetroSoundKey, number> = {
   deletePunch: require('../../assets/audio/delete_punch.wav'),
   deleteWrench: require('../../assets/audio/delete_wrench.wav'),
   deleteSolarBeam: require('../../assets/audio/delete_solar_beam.wav'),
-  robotIntroBreath: require('../../assets/audio/robot_intro_breath.wav'),
+  robotIntroGears: require('../../assets/audio/robot_intro_gears.wav'),
   wardenIntroPulse: require('../../assets/audio/warden_intro_pulse.wav'),
   quantumIntroHum: require('../../assets/audio/quantum_intro_hum.wav'),
   actionComplete: require('../../assets/audio/action_complete.wav'),
@@ -41,7 +41,7 @@ const CHARACTER_INTRO_AMBIENCE: Partial<
   >
 > = {
   black_male: { key: 'wardenIntroPulse', volume: 0.72 },
-  robot_neutral: { key: 'robotIntroBreath', volume: 0.78 },
+  robot_neutral: { key: 'robotIntroGears', volume: 0.74 },
   quantum_neutral: { key: 'quantumIntroHum', volume: 0.52 },
 };
 
@@ -174,7 +174,7 @@ export async function preloadRetroSounds(): Promise<void> {
       'deletePunch',
       'deleteWrench',
       'deleteSolarBeam',
-      'robotIntroBreath',
+      'robotIntroGears',
       'wardenIntroPulse',
       'quantumIntroHum',
       'actionComplete',
