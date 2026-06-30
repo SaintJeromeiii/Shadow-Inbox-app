@@ -161,7 +161,14 @@ function mountApiRouters(expressApp) {
 mountApiRouters(app);
 
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', service: 'shadow-inbox-email-relay' });
+  res.json({
+    status: 'ok',
+    service: 'shadow-inbox-email-relay',
+    entrypoint: 'backend/server.js',
+    deploySha: process.env.RAILWAY_GIT_COMMIT_SHA || null,
+    deployBranch: process.env.RAILWAY_GIT_BRANCH || null,
+    adminApi: true,
+  });
 });
 
 app.get('/api/accounts', (_req, res) => {
