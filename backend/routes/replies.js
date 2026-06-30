@@ -3,7 +3,7 @@ const { loadKnowledgeBase } = require('../knowledgeBase');
 const { resolveAccountKey, resolveFinanceAccountKeys } = require('../accounts');
 const { readNotifications, removeNotificationIds } = require('../notificationFeed');
 const { generateQuickReplies } = require('../quickReplyService');
-const { sendBroadcastReply } = require('../broadcastReply');
+const { sendBroadcastReplyWithRetry } = require('../relayRetryService');
 const { recordDeletions } = require('../userProgressService');
 const { getCharacterIdFromRequest } = require('../characterIds');
 
@@ -119,7 +119,7 @@ router.post('/send', async (req, res) => {
       return;
     }
 
-    const result = await sendBroadcastReply(
+    const result = await sendBroadcastReplyWithRetry(
       found.accountKey,
       found.notification,
       replyText,

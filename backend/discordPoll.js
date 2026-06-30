@@ -1,6 +1,7 @@
 const { resolveAccountKey } = require('./accounts');
 const { normalizeFromDiscordMessage } = require('./platformIngest');
 const { ingestPlatformMessages } = require('./chatIngestService');
+const { ingestPlatformMessagesWithIdempotency } = require('./inboundWebhookGuard');
 
 const seenMessageIds = new Set();
 const MAX_SEEN = 500;
@@ -72,7 +73,11 @@ async function pollDiscordChannels() {
       }
 
       if (normalized.length > 0) {
-        const result = await ingestPlatformMessages(accountKey, normalized);
+        const result = await ingestPlatformMessagesWithIdempotency(
+          accountKey,
+          normalized,
+          ingestPlatformMessages,
+        );
         ingested += result.ingested;
       }
     } catch (error) {

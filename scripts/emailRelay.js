@@ -46,6 +46,7 @@ const timelineRouter = require('../backend/routes/timeline');
 const firewallRouter = require('../backend/routes/firewall');
 const repliesRouter = require('../backend/routes/replies');
 const userRouter = require('../backend/routes/user');
+const adminRouter = require('../backend/routes/admin');
 const { recordDeletions, getPlayerStats } = require('../backend/userProgressService');
 const { getCharacterIdFromRequest } = require('../backend/characterIds');
 const { handleSlackWebhook } = require('../backend/slackWebhook');
@@ -139,19 +140,25 @@ app.post(
   handleSlackWebhook,
 );
 app.use(express.json({ limit: '1mb' }));
-app.use('/api/knowledge', knowledgeRouter);
-app.use('/api/calendar', calendarRouter);
-app.use('/api/emails', emailsRouter);
-app.use('/api/broadcast', broadcastRouter);
-app.use('/api/auto-pilot', autoPilotRouter);
-app.use('/api/finances', financesRouter);
-app.use('/api/notifications', notificationsRouter);
-app.use('/api/voice', voiceRouter);
-app.use('/api/briefing', briefingRouter);
-app.use('/api/timeline', timelineRouter);
-app.use('/api/firewall', firewallRouter);
-app.use('/api/replies', repliesRouter);
-app.use('/api/user', userRouter);
+
+function mountApiRouters(expressApp) {
+  expressApp.use('/api/knowledge', knowledgeRouter);
+  expressApp.use('/api/calendar', calendarRouter);
+  expressApp.use('/api/emails', emailsRouter);
+  expressApp.use('/api/broadcast', broadcastRouter);
+  expressApp.use('/api/auto-pilot', autoPilotRouter);
+  expressApp.use('/api/finances', financesRouter);
+  expressApp.use('/api/notifications', notificationsRouter);
+  expressApp.use('/api/voice', voiceRouter);
+  expressApp.use('/api/briefing', briefingRouter);
+  expressApp.use('/api/timeline', timelineRouter);
+  expressApp.use('/api/firewall', firewallRouter);
+  expressApp.use('/api/replies', repliesRouter);
+  expressApp.use('/api/user', userRouter);
+  expressApp.use('/api/admin', adminRouter);
+}
+
+mountApiRouters(app);
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', service: 'shadow-inbox-email-relay' });
@@ -688,6 +695,9 @@ function startServer(options = {}) {
     const { isSupabaseEnabled } = require('../backend/supabaseClient');
     const storageMode = isSupabaseEnabled() ? 'Supabase' : 'local JSON files';
     console.log(`Shadow Inbox email relay listening on http://${host}:${port}`);
+    console.log('[Relay] Admin ops API mounted at /api/admin');
+    console.log('[Relay]   GET  /api/admin/logs');
+    console.log('[Relay]   POST /api/admin/logs/:id/retry');
     console.log(`Storage: ${storageMode}`);
     if (cloudRuntime) {
       console.log(`Cloud:  https://shadow-inbox-production.up.railway.app (or your Railway URL)`);
@@ -712,7 +722,7 @@ function startServer(options = {}) {
   return server;
 }
 
-module.exports = { app, startServer };
+module.exports = { app, startServer, mountApiRouters };
 
 if (require.main === module) {
   startServer();

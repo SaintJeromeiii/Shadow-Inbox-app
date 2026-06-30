@@ -2,11 +2,12 @@ const express = require('express');
 const { resolveAccountKey } = require('../accounts');
 const { removeNotificationIds } = require('../notificationFeed');
 const { ingestPlatformMessages } = require('../chatIngestService');
+const { ingestPlatformMessagesWithIdempotency } = require('../inboundWebhookGuard');
 const { normalizeFromIngestPayload } = require('../platformIngest');
 const {
-  sendBroadcastReply,
-  findNotificationById,
-} = require('../broadcastReply');
+  sendBroadcastReplyWithRetry,
+} = require('../relayRetryService');
+const { findNotificationById } = require('../broadcastReply');
 const { pollDiscordChannels } = require('../discordPoll');
 
 const router = express.Router();
@@ -40,7 +41,7 @@ router.post('/reply', async (req, res) => {
   }
 
   try {
-    const result = await sendBroadcastReply(accountKey, notification, replyText);
+    const result = await sendBroadcastReplyWithRetry(accountKey, notification, replyText);
     await removeNotificationIds(accountKey, [notificationId]);
 
     console.log(
@@ -80,7 +81,11 @@ router.post('/ingest', async (req, res) => {
   }
 
   try {
-    const result = await ingestPlatformMessages(accountKey, normalized);
+    const result = await ingestPlatformMessagesWithIdempotency(
+      accountKey,
+      normalized,
+      ingestPlatformMessages,
+    );
     res.json({ success: true, accountKey, ...result });
   } catch (error) {
     res.status(500).json({

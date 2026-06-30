@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const { resolveAccountKey } = require('./accounts');
 const { normalizeFromSlackEvent } = require('./platformIngest');
 const { ingestPlatformMessages } = require('./chatIngestService');
+const { processInboundWebhook } = require('./inboundWebhookGuard');
 
 function parseAccountMap() {
   try {
@@ -80,9 +81,11 @@ async function handleSlackWebhook(req, res) {
 
   try {
     const accountKey = resolveAccountForSlackTeam(payload.team_id);
-    const result = await ingestPlatformMessages(accountKey, [normalized]);
+    const result = await processInboundWebhook(normalized.id, accountKey, async () =>
+      ingestPlatformMessages(accountKey, [normalized]),
+    );
     console.log(
-      `[Broadcast][Slack] Ingested ${result.ingested} message(s) into ${accountKey} feed.`,
+      `[Broadcast][Slack] Ingested ${result.ingested ?? 0} message(s) into ${accountKey} feed.`,
     );
     res.json({ ok: true, ...result, accountKey });
   } catch (error) {

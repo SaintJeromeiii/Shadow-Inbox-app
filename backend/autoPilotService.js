@@ -1,6 +1,6 @@
 const { findMatchingRule } = require('./autoRulesService');
 const { appendHistoryEntry } = require('./autoPilotHistory');
-const { sendBroadcastReply } = require('./broadcastReply');
+const { sendBroadcastReplyWithRetry } = require('./relayRetryService');
 const { completeTasksForNotification } = require('./taskService');
 const { removeNotificationIds } = require('./notificationFeed');
 const { archiveMessages } = require('./gmailClient');
@@ -71,7 +71,7 @@ async function maybeAutoPilot(accountKey, notification) {
       if (!rule.replyText?.trim()) {
         throw new Error(`Rule ${rule.id} is missing replyText.`);
       }
-      dispatchResult = await sendBroadcastReply(accountKey, notification, rule.replyText);
+      dispatchResult = await sendBroadcastReplyWithRetry(accountKey, notification, rule.replyText);
     }
 
     if (rule.autoCloseTask) {
