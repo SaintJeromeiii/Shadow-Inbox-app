@@ -7,12 +7,16 @@ import {
   type ImageStyle,
   type StyleProp,
 } from 'react-native';
-import { Video, ResizeMode, type AVPlaybackStatus } from 'expo-av';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import {
   getCharacterRegistryEntry,
   getCharacterVisualTierAssets,
 } from '../constants/characters';
 import { useCharacter } from '../context/CharacterContext';
+import {
+  startCharacterIntroAmbience,
+  stopCharacterIntroAmbience,
+} from '../services/retroSoundService';
 import type { CharacterId, VisualTier } from '../types/character';
 import { getVisualTierFromInboxCount } from '../utils/visualTier';
 import { arcadeColors } from '../theme/arcadeTheme';
@@ -28,6 +32,71 @@ export interface DynamicAvatarProps {
   inboxCount?: number;
   enableIntro?: boolean;
   replayToken?: number;
+}
+
+interface AvatarIntroVideoProps {
+  source: number;
+  characterId: CharacterId;
+  sessionId: string;
+  onEnd: () => void;
+}
+
+function AvatarIntroVideo({
+  source,
+  characterId,
+  sessionId,
+  onEnd,
+}: AvatarIntroVideoProps) {
+  const introSoundActiveRef = useRef(false);
+
+  const player = useVideoPlayer(source, (instance) => {
+    instance.loop = false;
+    instance.muted = true;
+    instance.audioMixingMode = 'mixWithOthers';
+  });
+
+  const stopIntroSound = useCallback(() => {
+    introSoundActiveRef.current = false;
+    stopCharacterIntroAmbience(sessionId);
+  }, [sessionId]);
+
+  useEffect(() => {
+    introSoundActiveRef.current = false;
+
+    const playingSubscription = player.addListener('playingChange', ({ isPlaying }) => {
+      if (isPlaying && !introSoundActiveRef.current) {
+        introSoundActiveRef.current = true;
+        void startCharacterIntroAmbience(characterId, sessionId);
+      }
+    });
+
+    const endSubscription = player.addListener('playToEnd', () => {
+      stopIntroSound();
+      player.pause();
+      onEnd();
+    });
+
+    player.currentTime = 0;
+    player.play();
+
+    return () => {
+      playingSubscription.remove();
+      endSubscription.remove();
+      player.pause();
+      stopIntroSound();
+    };
+  }, [player, characterId, sessionId, onEnd, stopIntroSound]);
+
+  return (
+    <VideoView
+      player={player}
+      style={[styles.media, styles.mediaOverlay, pixelatedImageStyle]}
+      contentFit="contain"
+      nativeControls={false}
+      allowsFullscreen={false}
+      accessibilityLabel="Character intro video"
+    />
+  );
 }
 
 export default function DynamicAvatar({
@@ -55,37 +124,14 @@ export default function DynamicAvatar({
 
   const canPlayIntro = enableIntro && tierAssets.intro != null;
   const [isVideoPlaying, setIsVideoPlaying] = useState(canPlayIntro);
-  const videoRef = useRef<Video>(null);
-
-  const restartIntro = useCallback(async () => {
-    if (!canPlayIntro) {
-      setIsVideoPlaying(false);
-      return;
-    }
-
-    setIsVideoPlaying(true);
-    try {
-      await videoRef.current?.setPositionAsync(0);
-      await videoRef.current?.playAsync();
-    } catch {
-      setIsVideoPlaying(false);
-    }
-  }, [canPlayIntro]);
+  const introSessionKey = `${characterId}-${visualTier}-${replayToken}`;
 
   useEffect(() => {
-    if (!canPlayIntro) {
-      setIsVideoPlaying(false);
-      return;
-    }
+    setIsVideoPlaying(canPlayIntro);
+  }, [canPlayIntro, introSessionKey]);
 
-    void restartIntro();
-  }, [canPlayIntro, replayToken, characterId, visualTier, restartIntro]);
-
-  const handlePlaybackStatusUpdate = useCallback((status: AVPlaybackStatus) => {
-    if (!status.isLoaded) return;
-    if (status.didJustFinish) {
-      setIsVideoPlaying(false);
-    }
+  const handleIntroEnd = useCallback(() => {
+    setIsVideoPlaying(false);
   }, []);
 
   return (
@@ -98,15 +144,12 @@ export default function DynamicAvatar({
           accessibilityLabel={`${registryEntry.codename} tier ${visualTier} avatar`}
         />
         {canPlayIntro && isVideoPlaying && tierAssets.intro != null ? (
-          <Video
-            ref={videoRef}
+          <AvatarIntroVideo
+            key={introSessionKey}
             source={tierAssets.intro}
-            style={[styles.media, styles.mediaOverlay, pixelatedImageStyle]}
-            resizeMode={ResizeMode.CONTAIN}
-            shouldPlay
-            isLooping={false}
-            onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
-            accessibilityLabel={`${registryEntry.codename} intro`}
+            characterId={characterId}
+            sessionId={`avatar-intro-${introSessionKey}`}
+            onEnd={handleIntroEnd}
           />
         ) : null}
       </View>

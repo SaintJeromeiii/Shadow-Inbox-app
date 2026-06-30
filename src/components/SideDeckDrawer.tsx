@@ -3,6 +3,7 @@ import {
   Animated,
   Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -72,50 +73,76 @@ export default function SideDeckDrawer({
           <Text style={styles.deckTitle}>SIDE DECK</Text>
           <Text style={styles.deckSubtitle}>Navigation matrix</Text>
 
-          <View style={styles.menuSection}>
-            {PRIMARY_DRAWER_ITEMS.map((item) => {
-              const isActive = activeRoute === item.route;
-              return (
-                <Pressable
-                  key={item.route}
-                  style={({ pressed }) => [
-                    styles.menuItem,
-                    isActive && styles.menuItemActive,
-                    pressed && styles.menuItemPressed,
-                  ]}
-                  onPress={() => onNavigate(item.route)}
-                >
-                  <Text style={[styles.menuLabel, isActive && styles.menuLabelActive]}>
-                    {item.label}
-                  </Text>
-                  <Text style={styles.menuSubtitle}>{item.subtitle}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
+          <ScrollView
+            style={styles.menuScroll}
+            contentContainerStyle={styles.menuScrollContent}
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+          >
+            <View style={styles.menuSection}>
+              {PRIMARY_DRAWER_ITEMS.map((item) => {
+                const isActive = activeRoute === item.route;
+                return (
+                  <Pressable
+                    key={item.route}
+                    style={({ pressed }) => [
+                      styles.menuItem,
+                      isActive && styles.menuItemActive,
+                      pressed && styles.menuItemPressed,
+                    ]}
+                    onPress={() => onNavigate(item.route)}
+                  >
+                    <Text style={[styles.menuLabel, isActive && styles.menuLabelActive]}>
+                      {item.label}
+                    </Text>
+                    <Text style={styles.menuSubtitle}>{item.subtitle}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
 
-          <View style={styles.divider} />
+            <View style={styles.divider} />
 
-          <View style={styles.menuSection}>
-            {SECONDARY_DRAWER_ITEMS.map((item) => {
-              const isActive = activeRoute === item.route;
-              return (
-                <Pressable
-                  key={item.route}
-                  style={({ pressed }) => [
-                    styles.menuItemSecondary,
-                    isActive && styles.menuItemActive,
-                    pressed && styles.menuItemPressed,
-                  ]}
-                  onPress={() => onNavigate(item.route)}
-                >
-                  <Text style={[styles.menuLabelSecondary, isActive && styles.menuLabelActive]}>
-                    {item.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
+            <Text style={styles.sectionLabel}>SYS / CONFIG</Text>
+
+            <View style={styles.menuSection}>
+              {SECONDARY_DRAWER_ITEMS.map((item) => {
+                const isActive = activeRoute === item.route;
+                const isOpsConsole = item.route === 'admin_logs';
+                return (
+                  <Pressable
+                    key={item.route}
+                    style={({ pressed }) => [
+                      styles.menuItemSecondary,
+                      isOpsConsole && styles.menuItemOps,
+                      isActive && styles.menuItemActive,
+                      isActive && isOpsConsole && styles.menuItemOpsActive,
+                      pressed && styles.menuItemPressed,
+                    ]}
+                    onPress={() => onNavigate(item.route)}
+                  >
+                    <Text
+                      style={[
+                        styles.menuLabelSecondary,
+                        isOpsConsole && styles.menuLabelOps,
+                        isActive && styles.menuLabelActive,
+                      ]}
+                    >
+                      {item.label}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.menuSubtitleSecondary,
+                        isOpsConsole && styles.menuSubtitleOps,
+                      ]}
+                    >
+                      {item.subtitle}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </ScrollView>
         </Animated.View>
       </View>
     </Modal>
@@ -177,7 +204,21 @@ const styles = StyleSheet.create({
     fontFamily: arcadeFonts.body,
     fontSize: 11,
     color: arcadeColors.textMuted,
-    marginBottom: 18,
+    marginBottom: 14,
+  },
+  menuScroll: {
+    flex: 1,
+  },
+  menuScrollContent: {
+    paddingBottom: 12,
+  },
+  sectionLabel: {
+    fontFamily: arcadeFonts.pixel,
+    fontSize: 6,
+    lineHeight: 10,
+    color: arcadeColors.neonPurple,
+    letterSpacing: 0.4,
+    marginBottom: 10,
   },
   menuSection: {
     gap: 8,
@@ -198,6 +239,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 10,
     backgroundColor: 'rgba(10, 20, 40, 0.65)',
+    gap: 3,
+  },
+  menuItemOps: {
+    borderWidth: 2,
+    borderColor: 'rgba(255, 224, 102, 0.55)',
+    backgroundColor: 'rgba(255, 102, 204, 0.08)',
+  },
+  menuItemOpsActive: {
+    borderColor: arcadeColors.neonYellow,
+    backgroundColor: 'rgba(255, 224, 102, 0.12)',
   },
   menuItemActive: {
     borderColor: arcadeColors.neonCyan,
@@ -220,6 +271,10 @@ const styles = StyleSheet.create({
     color: arcadeColors.textMuted,
     letterSpacing: 0.2,
   },
+  menuLabelOps: {
+    color: arcadeColors.neonYellow,
+    fontSize: 7,
+  },
   menuLabelActive: {
     color: arcadeColors.neonCyan,
   },
@@ -228,6 +283,15 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 15,
     color: arcadeColors.textMuted,
+  },
+  menuSubtitleSecondary: {
+    fontFamily: arcadeFonts.body,
+    fontSize: 10,
+    lineHeight: 14,
+    color: arcadeColors.textDim,
+  },
+  menuSubtitleOps: {
+    color: arcadeColors.neonPinkDim,
   },
   divider: {
     height: 1,

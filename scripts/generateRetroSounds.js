@@ -191,11 +191,89 @@ function renderDeleteSolarBeam() {
   return concatSegments([charge, beam, tail]);
 }
 
+/** Grid Stalker intro — servo inhale / vent exhale breathing loop */
+function renderRobotIntroBreath() {
+  const inhaleA = renderTone({
+    frequency: 110,
+    durationSec: 0.18,
+    volume: 0.18,
+    wave: 'sine',
+  });
+  const inhaleB = renderTone({
+    frequency: 185,
+    durationSec: 0.16,
+    volume: 0.14,
+    wave: 'sine',
+  });
+  const servo = renderTone({
+    frequency: 780,
+    durationSec: 0.05,
+    volume: 0.12,
+    wave: 'square',
+  });
+  const vent = renderNoiseBurst(0.12, 0.14);
+  const release = renderTone({
+    frequency: 92,
+    durationSec: 0.18,
+    volume: 0.16,
+    wave: 'sine',
+  });
+  const gap = new Float32Array(Math.floor(SAMPLE_RATE * 0.22));
+
+  return concatSegments([inhaleA, inhaleB, servo, vent, release, gap]);
+}
+
+/** Neon Warden intro — double heartbeat + stance-up surge */
+function renderWardenIntroPulse() {
+  const lub = renderTone({
+    frequency: 58,
+    durationSec: 0.09,
+    volume: 0.42,
+    wave: 'sine',
+  });
+  const dub = renderTone({
+    frequency: 46,
+    durationSec: 0.08,
+    volume: 0.36,
+    wave: 'sine',
+  });
+  const gapShort = new Float32Array(Math.floor(SAMPLE_RATE * 0.05));
+  const stanceCount = Math.floor(SAMPLE_RATE * 0.14);
+  const stance = new Float32Array(stanceCount);
+  for (let i = 0; i < stanceCount; i += 1) {
+    const t = i / SAMPLE_RATE;
+    const freq = 120 + t * 420;
+    const envelope = Math.exp(-t * 10) * 0.22;
+    stance[i] = Math.sin(2 * Math.PI * freq * t) * envelope;
+  }
+  const tail = new Float32Array(Math.floor(SAMPLE_RATE * 0.38));
+  return concatSegments([lub, gapShort, dub, stance, tail]);
+}
+
+/** Void Singularity intro — low cosmic hum pulse */
+function renderQuantumIntroHum() {
+  const count = Math.floor(SAMPLE_RATE * 1.55);
+  const samples = new Float32Array(count);
+  for (let i = 0; i < count; i += 1) {
+    const t = i / SAMPLE_RATE;
+    const pulse = 0.55 + 0.45 * Math.sin(2 * Math.PI * 0.65 * t);
+    const sub = Math.sin(2 * Math.PI * 52 * t) * 0.16 * pulse;
+    const body = Math.sin(2 * Math.PI * 104 * t) * 0.08 * pulse;
+    const shimmer = Math.sin(2 * Math.PI * 311 * t) * 0.05 * pulse;
+    const warp = Math.sin(2 * Math.PI * (180 + t * 40) * t) * 0.04;
+    samples[i] = sub + body + shimmer + warp;
+  }
+  return samples;
+}
+
 fs.mkdirSync(OUT_DIR, { recursive: true });
 writeWav(path.join(OUT_DIR, 'delete_action.wav'), renderDeleteAction());
 writeWav(path.join(OUT_DIR, 'delete_punch.wav'), renderDeletePunch());
 writeWav(path.join(OUT_DIR, 'delete_wrench.wav'), renderDeleteWrench());
 writeWav(path.join(OUT_DIR, 'delete_solar_beam.wav'), renderDeleteSolarBeam());
+writeWav(path.join(OUT_DIR, 'robot_intro_breath.wav'), renderRobotIntroBreath());
+writeWav(path.join(OUT_DIR, 'warden_intro_pulse.wav'), renderWardenIntroPulse());
+writeWav(path.join(OUT_DIR, 'quantum_intro_hum.wav'), renderQuantumIntroHum());
 writeWav(path.join(OUT_DIR, 'action_complete.wav'), renderActionComplete());
 writeWav(path.join(OUT_DIR, 'level_up.wav'), renderLevelUp());
 console.log('Generated retro sounds in assets/audio/');

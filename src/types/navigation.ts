@@ -6,7 +6,8 @@ export type DrawerRoute =
   | 'hero_status'
   | 'intel_deck'
   | 'auto_pilot'
-  | 'knowledge_core';
+  | 'knowledge_core'
+  | 'admin_logs';
 
 export interface DrawerMenuItem {
   route: DrawerRoute;
@@ -57,5 +58,10 @@ export const SECONDARY_DRAWER_ITEMS: DrawerMenuItem[] = [
     route: 'knowledge_core',
     label: 'KNOWLEDGE CORE',
     subtitle: 'AI memory synthesis',
+  },
+  {
+    route: 'admin_logs',
+    label: 'OPS CONSOLE',
+    subtitle: 'Automation logs & replay',
   },
 ];

@@ -78,19 +78,13 @@ module.exports = {
         },
       ],
       [
-        'expo-av',
-        {
-          microphonePermission:
-            'Allow Shadow Inbox to record voice notes and email draft commands.',
-        },
-      ],
-      [
         'expo-audio',
         {
           microphonePermission:
             'Allow Shadow Inbox to record voice notes and email draft commands.',
         },
       ],
+      'expo-video',
     ],
     extra: {
       eas: {

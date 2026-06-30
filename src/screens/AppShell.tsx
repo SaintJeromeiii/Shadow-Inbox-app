@@ -5,6 +5,7 @@ import HeroStatusScreen from './HeroStatusScreen';
 import IntelDeckScreen from './IntelDeckScreen';
 import KnowledgeScreen from './KnowledgeScreen';
 import AutoPilotScreen from './AutoPilotScreen';
+import AdminLogsScreen from './AdminLogsScreen';
 import FirewallSettings from './FirewallSettings';
 import CharacterSelectScreen from './CharacterSelectScreen';
 import CharacterRankingScreen from './CharacterRankingScreen';
@@ -134,6 +135,15 @@ export default function AppShell() {
 
       <ScreenSlot active={route === 'knowledge_core'}>
         <KnowledgeScreen
+          visible
+          variant="screen"
+          onClose={goToPlayStage}
+          onOpenDrawer={openDrawer}
+        />
+      </ScreenSlot>
+
+      <ScreenSlot active={route === 'admin_logs'}>
+        <AdminLogsScreen
           visible
           variant="screen"
           onClose={goToPlayStage}
