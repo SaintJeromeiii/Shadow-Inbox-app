@@ -14,8 +14,12 @@ import { useAccount } from '../context/AccountContext';
 import {
   adminLogsService,
   AUTOMATION_LOG_FILTERS,
+  fetchAutomationLogs,
   formatAutomationEventType,
   formatAutomationLogTimestamp,
+  isNetworkError,
+  loadCachedAutomationLogs,
+  saveCachedAutomationLogs,
 } from '../services/adminLogsService';
 import type { AutomationLog, AutomationLogStatus, AutomationLogStatusFilter } from '../types/automationLog';
 import { ArcadeHamburgerIcon } from '../components/ArcadeIcons';
@@ -115,6 +119,9 @@ export default function AdminLogsScreen({
   const [refreshing, setRefreshing] = useState(false);
   const [statusFilter, setStatusFilter] = useState<AutomationLogStatusFilter>('all');
   const [replayingId, setReplayingId] = useState<string | null>(null);
+  const [networkError, setNetworkError] = useState(false);
+  const [usingCachedData, setUsingCachedData] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const loadLogs = useCallback(
     async (isRefresh = false) => {
@@ -124,12 +131,44 @@ export default function AdminLogsScreen({
         setLoading(true);
       }
 
-      const data = await adminLogsService.fetchLogs(activeAccount);
-      setLogs(data);
-      setLoading(false);
-      setRefreshing(false);
+      setErrorMessage(null);
+
+      try {
+        const data = await fetchAutomationLogs({
+          accountKey: activeAccount,
+          status: statusFilter,
+          limit: 50,
+          allAccounts: true,
+        });
+
+        setLogs(data);
+        setNetworkError(false);
+        setUsingCachedData(false);
+        await saveCachedAutomationLogs(activeAccount, data);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'Could not load automation logs.';
+        console.error('[Ops Console] Failed to load logs:', error);
+
+        const cached = await loadCachedAutomationLogs(activeAccount);
+        if (cached && cached.length > 0) {
+          setLogs(cached);
+          setUsingCachedData(true);
+        }
+
+        if (isNetworkError(error)) {
+          setNetworkError(true);
+          setErrorMessage('Relay unreachable. Showing last cached ledger if available.');
+        } else {
+          setNetworkError(false);
+          setErrorMessage(message);
+        }
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
     },
-    [activeAccount],
+    [activeAccount, statusFilter],
   );
 
   useEffect(() => {
@@ -193,6 +232,21 @@ export default function AdminLogsScreen({
           }}
         />
       </View>
+
+      {networkError ? (
+        <Pressable style={styles.networkBanner} onPress={() => void loadLogs(true)}>
+          <Ionicons name="cloud-offline-outline" size={18} color={arcadeColors.neonYellow} />
+          <Text style={styles.networkBannerText}>CONNECTION DISRUPTED — TAP TO RECONNECT</Text>
+        </Pressable>
+      ) : null}
+
+      {usingCachedData && !networkError ? (
+        <Text style={styles.cacheHint}>Showing cached automation ledger.</Text>
+      ) : null}
+
+      {errorMessage && !networkError ? (
+        <Text style={styles.errorBanner}>{errorMessage}</Text>
+      ) : null}
 
       {loading ? (
         <View style={styles.centered}>
@@ -468,5 +522,43 @@ const styles = StyleSheet.create({
     color: arcadeColors.textMuted,
     fontSize: 14,
     fontFamily: arcadeFonts.body,
+  },
+  networkBanner: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 4,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: arcadeColors.neonYellow,
+    backgroundColor: 'rgba(255, 224, 102, 0.12)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  networkBannerText: {
+    color: arcadeColors.neonYellow,
+    fontFamily: arcadeFonts.pixel,
+    fontSize: 7,
+    letterSpacing: 0.3,
+    textAlign: 'center',
+  },
+  cacheHint: {
+    color: arcadeColors.textMuted,
+    fontSize: 11,
+    fontFamily: arcadeFonts.body,
+    textAlign: 'center',
+    marginTop: 8,
+    marginHorizontal: 16,
+  },
+  errorBanner: {
+    color: arcadeColors.danger,
+    fontSize: 12,
+    fontFamily: arcadeFonts.body,
+    textAlign: 'center',
+    marginTop: 8,
+    marginHorizontal: 16,
   },
 });

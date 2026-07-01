@@ -12,7 +12,8 @@ require('dotenv').config();
 const cron = require('node-cron');
 const { fetchNotifications } = require('./fetchNotifications');
 const { loadKnowledgeBase } = require('../backend/knowledgeBase');
-const { listAccountKeys } = require('../backend/accounts');
+const { listAccountKeys, getAccount } = require('../backend/accounts');
+const { ensureGmailAccessToken } = require('../backend/services/gmailAuth');
 const { pollDiscordChannels } = require('../backend/discordPoll');
 
 const knowledgeBase = loadKnowledgeBase();
@@ -31,6 +32,22 @@ function formatTimestamp() {
   });
 }
 
+async function refreshOAuthTokensForPolling() {
+  for (const accountKey of listAccountKeys()) {
+    const account = getAccount(accountKey);
+    if (!account?.oauth) {
+      continue;
+    }
+
+    try {
+      await ensureGmailAccessToken(accountKey);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[Daemon][${accountKey}] OAuth refresh failed before poll: ${message}`);
+    }
+  }
+}
+
 async function runCheck(trigger = 'scheduled') {
   if (isRunning) {
     console.log(`[Daemon] Skipping ${trigger} check — previous fetch still in progress.`);
@@ -41,6 +58,8 @@ async function runCheck(trigger = 'scheduled') {
   console.log(`[Daemon] Checking Gmail... (${formatTimestamp()})`);
 
   try {
+    await refreshOAuthTokensForPolling();
+
     for (const accountKey of listAccountKeys()) {
       const stats = await fetchNotifications({ accountKey, silent: true });
       const updateLabel = stats.newCount === 1 ? 'update' : 'updates';

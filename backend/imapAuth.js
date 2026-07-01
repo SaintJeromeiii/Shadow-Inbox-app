@@ -1,6 +1,6 @@
 const Imap = require('imap');
 const { getAccount, resolveAccountKey } = require('./accounts');
-const { getValidAccessToken } = require('./googleOAuth');
+const { ensureGmailAccessToken } = require('./services/gmailAuth');
 
 /** Gmail IMAP expects a base64 XOAUTH2 blob, not a raw bearer token. */
 function buildXOAuth2Token(user, accessToken) {
@@ -15,7 +15,7 @@ async function getImapConfigForAccount(accountKey) {
   }
 
   if (account.oauth) {
-    const accessToken = await getValidAccessToken(account.key);
+    const accessToken = await ensureGmailAccessToken(account.key);
     return {
       user: account.email,
       xoauth2: buildXOAuth2Token(account.email, accessToken),

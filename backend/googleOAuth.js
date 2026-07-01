@@ -10,6 +10,24 @@ const {
 
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_USERINFO_URL = 'https://www.googleapis.com/oauth2/v2/userinfo';
+const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
+
+function needsAccessTokenRefresh(account) {
+  if (!account?.accessToken) {
+    return true;
+  }
+
+  const expiresAt = Number(account.expiresAt);
+  if (!Number.isFinite(expiresAt) || expiresAt <= 0) {
+    return true;
+  }
+
+  if (expiresAt <= Date.now()) {
+    return true;
+  }
+
+  return expiresAt - Date.now() < TOKEN_REFRESH_BUFFER_MS;
+}
 
 function getGoogleWebClientId() {
   return (
@@ -167,10 +185,19 @@ async function getValidAccessToken(accountKey) {
     throw new Error(`OAuth account not found: ${accountKey}`);
   }
 
-  const expiresSoon = account.expiresAt - Date.now() < 60_000;
-  if (!expiresSoon && account.accessToken) {
+  if (!needsAccessTokenRefresh(account)) {
     return account.accessToken;
   }
+
+  if (!account.refreshToken) {
+    throw new Error(
+      `No refresh token stored for account "${accountKey}". Re-link the Google account in the app.`,
+    );
+  }
+
+  console.log(
+    `[GoogleOAuth] Access token expired or expiring soon for ${account.email} — refreshing...`,
+  );
 
   const refreshed = await refreshAccessToken(accountKey);
   return refreshed.accessToken;
@@ -237,6 +264,8 @@ module.exports = {
   getValidAccessToken,
   refreshAccessToken,
   exchangeAuthorizationCode,
+  needsAccessTokenRefresh,
+  TOKEN_REFRESH_BUFFER_MS,
   GOOGLE_OAUTH_SCOPES,
   accountHasCalendarScope,
 };

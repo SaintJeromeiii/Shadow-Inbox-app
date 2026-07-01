@@ -1,4 +1,5 @@
 import { Alert } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getActiveAccountKey, getRelayUrl } from './emailService';
 import type { AccountKey } from '../types/account';
 import type {
@@ -9,6 +10,66 @@ import type {
 
 const ADMIN_BASE_URL = `${getRelayUrl()}/api/admin`;
 const ADMIN_TOKEN = process.env.EXPO_PUBLIC_ADMIN_TOKEN ?? '';
+const ADMIN_FETCH_TIMEOUT_MS = 15_000;
+const ADMIN_LOGS_CACHE_PREFIX = '@shadow_inbox/admin_logs_cache/';
+
+export function isNetworkError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return /network request failed|failed to fetch|timed out|timeout|abort|connection|offline|cannot reach/i.test(
+    message,
+  );
+}
+
+function adminLogsCacheKey(accountKey: AccountKey): string {
+  return `${ADMIN_LOGS_CACHE_PREFIX}${accountKey}`;
+}
+
+export async function loadCachedAutomationLogs(
+  accountKey: AccountKey,
+): Promise<AutomationLog[] | null> {
+  try {
+    const raw = await AsyncStorage.getItem(adminLogsCacheKey(accountKey));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { logs?: AutomationLog[] };
+    return Array.isArray(parsed.logs) ? parsed.logs : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveCachedAutomationLogs(
+  accountKey: AccountKey,
+  logs: AutomationLog[],
+): Promise<void> {
+  try {
+    await AsyncStorage.setItem(
+      adminLogsCacheKey(accountKey),
+      JSON.stringify({ logs, cachedAt: new Date().toISOString() }),
+    );
+  } catch (error) {
+    console.warn('[AdminLogs] Failed to cache automation logs:', error);
+  }
+}
+
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs = ADMIN_FETCH_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error(`Admin API request timed out after ${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 function buildAdminHeaders(
   accountKey: AccountKey,
@@ -65,7 +126,7 @@ async function fetchLogsInternal(
     params.set('allAccounts', 'true');
   }
 
-  const response = await fetch(`${ADMIN_BASE_URL}/logs?${params.toString()}`, {
+  const response = await fetchWithTimeout(`${ADMIN_BASE_URL}/logs?${params.toString()}`, {
     method: 'GET',
     headers: buildAdminHeaders(accountKey),
   });

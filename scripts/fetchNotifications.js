@@ -22,6 +22,7 @@ const { sendPushNotification } = require('../backend/services/pushNotificationSe
 const { upsertLog, updateLogByMessageId } = require('../backend/automationLogsService');
 
 const MAX_UNREAD = 15;
+const AI_BODY_MAX_CHARS = 1500;
 
 function stripHtml(html) {
   return html
@@ -82,9 +83,44 @@ function parseBodyFromRawText(rawText) {
   return parts.slice(1).join('\n\n').trim();
 }
 
+/**
+ * Strips HTML/CSS noise and caps length before GPT classification.
+ */
+function prepareEmailTextForAi(rawText) {
+  let plain = String(rawText || '');
+
+  if (/<[a-z][\s\S]*>/i.test(plain)) {
+    plain = stripHtml(plain);
+  }
+
+  plain = plain
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/\{[^{}]*:[^{}]*;[^{}]*\}/g, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\r\n/g, '\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+
+  if (plain.length > AI_BODY_MAX_CHARS) {
+    plain = `${plain.slice(0, AI_BODY_MAX_CHARS).trim()}…`;
+  }
+
+  return plain;
+}
+
 async function classifyAndLogEmail(notification, accountKey) {
   const subject = parseSubjectFromRawText(notification.rawText);
-  const body = parseBodyFromRawText(notification.rawText);
+  const body = prepareEmailTextForAi(parseBodyFromRawText(notification.rawText));
 
   console.log(`[Processing] Analyzing incoming email ID: ${notification.id}`);
 
