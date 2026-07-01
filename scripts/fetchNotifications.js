@@ -17,6 +17,8 @@ const { openInbox } = require('../backend/imapAuth');
 const { getImapConfigForAccount } = require('../backend/imapAuth');
 const { enrichNotifications } = require('../backend/notificationEnrichment');
 const { extractMailparserAttachments } = require('../backend/emailAttachments');
+const { analyzeEmail } = require('../backend/services/aiClassifier');
+const { upsertLog, updateLogByMessageId } = require('../backend/automationLogsService');
 
 const MAX_UNREAD = 15;
 
@@ -64,6 +66,76 @@ function buildRawText(subject, body) {
   const subjectLine = subject ? `Subject: ${subject}` : 'Subject: (no subject)';
   const cleanBody = body || '(empty body)';
   return `${subjectLine}\n\n${cleanBody}`;
+}
+
+function parseSubjectFromRawText(rawText) {
+  const match = String(rawText || '').match(/^Subject:\s*(.+)$/m);
+  return match?.[1]?.trim() || '(no subject)';
+}
+
+function parseBodyFromRawText(rawText) {
+  const parts = String(rawText || '').split(/\n\n/);
+  if (parts.length <= 1) {
+    return '';
+  }
+  return parts.slice(1).join('\n\n').trim();
+}
+
+async function classifyAndLogEmail(notification, accountKey) {
+  const subject = parseSubjectFromRawText(notification.rawText);
+  const body = parseBodyFromRawText(notification.rawText);
+
+  console.log(`[Processing] Analyzing incoming email ID: ${notification.id}`);
+
+  const aiAnalysis = await analyzeEmail(notification.sender, subject, body);
+
+  const logPayload = {
+    notificationId: notification.id,
+    sender: notification.sender,
+    subject,
+    sourceApp: notification.sourceApp,
+    timestamp: notification.timestamp,
+    aiSummary: aiAnalysis.summary,
+    category: aiAnalysis.category,
+    priority: aiAnalysis.priority,
+    ...(aiAnalysis.ai_error ? { ai_error: aiAnalysis.ai_error } : {}),
+  };
+
+  try {
+    await upsertLog({
+      messageId: notification.id,
+      accountKey,
+      eventType: 'inbound_email',
+      status: 'processing',
+      payload: logPayload,
+    });
+
+    await updateLogByMessageId(notification.id, {
+      status: 'completed',
+      resultPayload: aiAnalysis,
+      errorMessage: aiAnalysis.ai_error ?? null,
+    });
+  } catch (error) {
+    console.error(
+      `[Processing] Failed to save automation log for ${notification.id}:`,
+      error,
+    );
+  }
+
+  return {
+    ...notification,
+    aiSummary: aiAnalysis.summary,
+    aiCategory: aiAnalysis.category,
+    aiPriority: aiAnalysis.priority,
+  };
+}
+
+async function applyAiClassificationToNotifications(notifications, accountKey) {
+  const classified = [];
+  for (const notification of notifications) {
+    classified.push(await classifyAndLogEmail(notification, accountKey));
+  }
+  return classified;
 }
 
 function openInboxFromConfig(config) {
@@ -208,8 +280,13 @@ async function fetchNotifications(options = {}) {
       (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
     );
 
+    const aiClassified = await applyAiClassificationToNotifications(
+      notifications,
+      accountKey,
+    );
+
     const existing = await readNotifications(accountKey);
-    const enriched = await enrichNotifications(accountKey, notifications, existing, {
+    const enriched = await enrichNotifications(accountKey, aiClassified, existing, {
       pendingAttachments,
     });
     const newCount = enriched.filter((item) => !previousIds.has(item.id)).length;
@@ -274,8 +351,13 @@ async function fetchNotifications(options = {}) {
     (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
   );
 
+  const aiClassified = await applyAiClassificationToNotifications(
+    notifications,
+    accountKey,
+  );
+
   const existing = await readNotifications(accountKey);
-  const enriched = await enrichNotifications(accountKey, notifications, existing, {
+  const enriched = await enrichNotifications(accountKey, aiClassified, existing, {
     pendingAttachments,
   });
   const newCount = enriched.filter((item) => !previousIds.has(item.id)).length;
