@@ -18,6 +18,7 @@ const { getImapConfigForAccount } = require('../backend/imapAuth');
 const { enrichNotifications } = require('../backend/notificationEnrichment');
 const { extractMailparserAttachments } = require('../backend/emailAttachments');
 const { analyzeEmail } = require('../backend/services/aiClassifier');
+const { sendPushNotification } = require('../backend/services/pushNotificationService');
 const { upsertLog, updateLogByMessageId } = require('../backend/automationLogsService');
 
 const MAX_UNREAD = 15;
@@ -88,6 +89,26 @@ async function classifyAndLogEmail(notification, accountKey) {
   console.log(`[Processing] Analyzing incoming email ID: ${notification.id}`);
 
   const aiAnalysis = await analyzeEmail(notification.sender, subject, body);
+
+  if (String(aiAnalysis.priority || '').toLowerCase() === 'high') {
+    try {
+      await sendPushNotification(
+        `🚨 High Priority: ${notification.sender}`,
+        aiAnalysis.summary,
+        {
+          logId: notification.id,
+          screen: 'admin_logs',
+          accountKey,
+          category: aiAnalysis.category,
+        },
+      );
+    } catch (error) {
+      console.error(
+        `[Processing] High-priority push failed for ${notification.id}:`,
+        error,
+      );
+    }
+  }
 
   const logPayload = {
     notificationId: notification.id,
