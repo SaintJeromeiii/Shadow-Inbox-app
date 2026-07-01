@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Fetches unread emails via IMAP into per-account notification feeds.
+ * Fetches unread emails into per-account notification feeds.
+ * OAuth accounts sync via Gmail API (paginated); password accounts use IMAP.
  *
  * Usage:
  *   node scripts/fetchNotifications.js
@@ -9,19 +10,26 @@
 
 require('dotenv').config();
 
-const fs = require('fs');
 const { simpleParser } = require('mailparser');
 const { getAccount, resolveAccountKey } = require('../backend/accounts');
 const { readNotifications, writeNotifications } = require('../backend/notificationFeed');
 const { openInbox } = require('../backend/imapAuth');
-const { getImapConfigForAccount } = require('../backend/imapAuth');
 const { enrichNotifications } = require('../backend/notificationEnrichment');
 const { extractMailparserAttachments } = require('../backend/emailAttachments');
 const { analyzeEmail } = require('../backend/services/aiClassifier');
 const { sendPushNotification } = require('../backend/services/pushNotificationService');
 const { upsertLog, updateLogByMessageId } = require('../backend/automationLogsService');
+const {
+  listAllUnreadInboxMessageIds,
+  getGmailMessageRaw,
+  GMAIL_LIST_PAGE_SIZE,
+} = require('../backend/gmailApi');
 
-const MAX_UNREAD = 15;
+const IMAP_FETCH_PAGE_SIZE = Number(process.env.IMAP_FETCH_PAGE_SIZE) || GMAIL_LIST_PAGE_SIZE;
+const FETCH_MAX_UNREAD =
+  Number(process.env.FETCH_MAX_UNREAD) > 0 ? Number(process.env.FETCH_MAX_UNREAD) : null;
+const FETCH_MAX_UNREAD_CAP =
+  Number(process.env.FETCH_MAX_UNREAD_CAP) > 0 ? Number(process.env.FETCH_MAX_UNREAD_CAP) : 500;
 const AI_BODY_MAX_CHARS = 1500;
 
 function stripHtml(html) {
@@ -247,6 +255,123 @@ function fetchMessages(imap, uids) {
   });
 }
 
+function selectUnreadUids(unreadUids) {
+  const sorted = [...unreadUids].sort((a, b) => b - a);
+  const limit = FETCH_MAX_UNREAD ?? FETCH_MAX_UNREAD_CAP;
+  return sorted.slice(0, limit);
+}
+
+async function fetchMessagesInPages(imap, uids, pageSize = IMAP_FETCH_PAGE_SIZE) {
+  const allMessages = [];
+
+  for (let offset = 0; offset < uids.length; offset += pageSize) {
+    const chunk = uids.slice(offset, offset + pageSize);
+    const batch = await fetchMessages(imap, chunk);
+    allMessages.push(...batch);
+  }
+
+  return allMessages;
+}
+
+async function fetchOAuthUnreadViaGmailApi(accountKey, { silent = false } = {}) {
+  const unreadApiIds = await listAllUnreadInboxMessageIds(accountKey, {
+    maxResults: GMAIL_LIST_PAGE_SIZE,
+    hardCap: FETCH_MAX_UNREAD ?? FETCH_MAX_UNREAD_CAP,
+  });
+
+  if (!silent) {
+    console.log(
+      `[${accountKey}] Gmail API reports ${unreadApiIds.length} unread inbox message(s) — fetching bodies...`,
+    );
+  }
+
+  const rawMessages = [];
+  for (let offset = 0; offset < unreadApiIds.length; offset += GMAIL_LIST_PAGE_SIZE) {
+    const pageIds = unreadApiIds.slice(offset, offset + GMAIL_LIST_PAGE_SIZE);
+
+    for (const apiMessageId of pageIds) {
+      try {
+        const buffer = await getGmailMessageRaw(accountKey, apiMessageId);
+        rawMessages.push({
+          uid: apiMessageId,
+          buffer: buffer.toString('utf8'),
+          gmailMsgId: apiMessageId,
+          gmailApiMessageId: apiMessageId,
+          useGmailApiId: true,
+        });
+      } catch (error) {
+        console.warn(
+          `[${accountKey}] Failed to fetch Gmail message ${apiMessageId}:`,
+          error instanceof Error ? error.message : error,
+        );
+      }
+    }
+  }
+
+  return {
+    unreadTotal: unreadApiIds.length,
+    rawMessages,
+  };
+}
+
+async function buildNotificationsFromRawMessages(rawMessages) {
+  const notifications = [];
+  const pendingAttachments = new Map();
+
+  for (const message of rawMessages) {
+    const notificationId = message.useGmailApiId
+      ? `gmail-${message.uid}`
+      : `email-${message.uid}`;
+
+    const { notification, mailparserAttachments } = await parseMessage(
+      message.buffer,
+      message.uid,
+      {
+        gmailMsgId: message.gmailMsgId,
+        notificationId,
+        gmailApiMessageId: message.gmailApiMessageId || null,
+      },
+    );
+
+    if (mailparserAttachments.length > 0) {
+      pendingAttachments.set(notification.id, mailparserAttachments);
+    }
+    notifications.push(notification);
+  }
+
+  notifications.sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+  );
+
+  return { notifications, pendingAttachments };
+}
+
+async function finalizeNotificationBatch(accountKey, notifications, pendingAttachments, silent) {
+  const account = getAccount(resolveAccountKey(accountKey));
+  const previousIds = new Set((await readNotifications(accountKey)).map((item) => item.id));
+
+  const aiClassified = await applyAiClassificationToNotifications(notifications, accountKey);
+
+  const existing = await readNotifications(accountKey);
+  const enriched = await enrichNotifications(accountKey, aiClassified, existing, {
+    pendingAttachments,
+  });
+  const newCount = enriched.filter((item) => !previousIds.has(item.id)).length;
+  await writeNotifications(accountKey, enriched);
+
+  if (!silent) {
+    console.log(
+      `[${accountKey}] Wrote ${enriched.length} notification(s) to ${account.feedFile}`,
+    );
+  }
+
+  return {
+    accountKey,
+    newCount,
+    writtenCount: enriched.length,
+  };
+}
+
 async function parseMessage(buffer, uid, meta = {}) {
   const parsed = await simpleParser(buffer);
   const subject = parsed.subject || '';
@@ -257,13 +382,14 @@ async function parseMessage(buffer, uid, meta = {}) {
 
   return {
     notification: {
-      id: `email-${uid}`,
+      id: meta.notificationId || `email-${uid}`,
       sourceApp: 'Email',
       sender,
       rawText: buildRawText(subject, body),
       timestamp,
       messageIdHeader: parsed.messageId || null,
       gmailMessageId: meta.gmailMsgId || null,
+      gmailApiMessageId: meta.gmailApiMessageId || null,
     },
     mailparserAttachments,
   };
@@ -299,70 +425,30 @@ async function fetchNotifications(options = {}) {
   }
 
   if (account.oauth) {
-    const imapConfig = await getImapConfigForAccount(accountKey);
-    const previousIds = new Set((await readNotifications(accountKey)).map((item) => item.id));
-
     if (!silent) {
-      console.log(`[${accountKey}] Connecting via Google OAuth as ${imapConfig.user}...`);
+      console.log(`[${accountKey}] Syncing unread inbox via Gmail API + OAuth...`);
     }
 
-    const imap = await openInboxFromConfig(imapConfig);
-    const unreadUids = await searchUnread(imap);
-    const selectedUids = unreadUids.slice(-MAX_UNREAD).reverse();
-
-    if (!silent) {
-      console.log(
-        `[${accountKey}] Found ${unreadUids.length} unread — fetching ${selectedUids.length}...`,
-      );
-    }
-
-    const rawMessages = await fetchMessages(imap, selectedUids);
-    imap.end();
-
-    const notifications = [];
-    const pendingAttachments = new Map();
-    for (const message of rawMessages) {
-      const { notification, mailparserAttachments } = await parseMessage(
-        message.buffer,
-        message.uid,
-        { gmailMsgId: message.gmailMsgId },
-      );
-      if (mailparserAttachments.length > 0) {
-        pendingAttachments.set(notification.id, mailparserAttachments);
-      }
-      notifications.push(notification);
-    }
-
-    notifications.sort(
-      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
-    );
-
-    const aiClassified = await applyAiClassificationToNotifications(
-      notifications,
-      accountKey,
-    );
-
-    const existing = await readNotifications(accountKey);
-    const enriched = await enrichNotifications(accountKey, aiClassified, existing, {
-      pendingAttachments,
+    const { unreadTotal, rawMessages } = await fetchOAuthUnreadViaGmailApi(accountKey, {
+      silent,
     });
-    const newCount = enriched.filter((item) => !previousIds.has(item.id)).length;
-    await writeNotifications(accountKey, enriched);
-
-    if (!silent) {
-      console.log(
-        `[${accountKey}] Wrote ${enriched.length} notification(s) to ${account.feedFile}`,
-      );
-    }
+    const { notifications, pendingAttachments } = await buildNotificationsFromRawMessages(
+      rawMessages,
+    );
+    const result = await finalizeNotificationBatch(
+      accountKey,
+      notifications,
+      pendingAttachments,
+      silent,
+    );
 
     return {
-      accountKey,
-      unreadTotal: unreadUids.length,
-      fetchedCount: selectedUids.length,
-      newCount,
-      writtenCount: enriched.length,
+      ...result,
+      unreadTotal,
+      fetchedCount: rawMessages.length,
       mockOnly: false,
       oauth: true,
+      syncMode: 'gmail_api',
     };
   }
 
@@ -371,68 +457,39 @@ async function fetchNotifications(options = {}) {
     throw new Error(`IMAP credentials missing for account "${accountKey}".`);
   }
 
-  const previousIds = new Set((await readNotifications(accountKey)).map((item) => item.id));
-
   if (!silent) {
     console.log(`[${accountKey}] Connecting to ${host}:${port} as ${user}...`);
   }
 
   const imap = await openInboxFromConfig({ user, password, host, port });
   const unreadUids = await searchUnread(imap);
-  const selectedUids = unreadUids.slice(-MAX_UNREAD).reverse();
+  const selectedUids = selectUnreadUids(unreadUids);
 
   if (!silent) {
     console.log(
-      `[${accountKey}] Found ${unreadUids.length} unread — fetching ${selectedUids.length}...`,
+      `[${accountKey}] Found ${unreadUids.length} unread — fetching ${selectedUids.length} in pages of ${IMAP_FETCH_PAGE_SIZE}...`,
     );
   }
 
-  const rawMessages = await fetchMessages(imap, selectedUids);
+  const rawMessages = await fetchMessagesInPages(imap, selectedUids);
   imap.end();
 
-  const notifications = [];
-  const pendingAttachments = new Map();
-  for (const message of rawMessages) {
-    const { notification, mailparserAttachments } = await parseMessage(
-      message.buffer,
-      message.uid,
-      { gmailMsgId: message.gmailMsgId },
-    );
-    if (mailparserAttachments.length > 0) {
-      pendingAttachments.set(notification.id, mailparserAttachments);
-    }
-    notifications.push(notification);
-  }
-
-  notifications.sort(
-    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+  const { notifications, pendingAttachments } = await buildNotificationsFromRawMessages(
+    rawMessages,
   );
-
-  const aiClassified = await applyAiClassificationToNotifications(
-    notifications,
+  const result = await finalizeNotificationBatch(
     accountKey,
-  );
-
-  const existing = await readNotifications(accountKey);
-  const enriched = await enrichNotifications(accountKey, aiClassified, existing, {
+    notifications,
     pendingAttachments,
-  });
-  const newCount = enriched.filter((item) => !previousIds.has(item.id)).length;
-  await writeNotifications(accountKey, enriched);
-
-  if (!silent) {
-    console.log(
-      `[${accountKey}] Wrote ${enriched.length} notification(s) to ${account.feedFile}`,
-    );
-  }
+    silent,
+  );
 
   return {
-    accountKey,
+    ...result,
     unreadTotal: unreadUids.length,
     fetchedCount: selectedUids.length,
-    newCount,
-    writtenCount: enriched.length,
     mockOnly: false,
+    syncMode: 'imap',
   };
 }
 
