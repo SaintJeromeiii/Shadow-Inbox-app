@@ -99,7 +99,7 @@ function LogCard({
             </View>
           ) : null}
 
-          {log.status === 'dead_letter' ? (
+          {(log.status === 'dead_letter' || log.status === 'failed') ? (
             <Pressable
               style={[styles.replayButton, replaying && styles.replayButtonDisabled]}
               onPress={(event) => {

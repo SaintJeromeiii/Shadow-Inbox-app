@@ -8,7 +8,8 @@ const router = express.Router();
 function getAccountKeyFromRequest(req) {
   const header = req.headers['x-account-key'];
   const query = req.query?.accountKey;
-  return resolveAccountKey(header || query || 'personal');
+  const bodyKey = req.body?.accountKey;
+  return resolveAccountKey(header || query || bodyKey || 'personal');
 }
 
 router.get('/health', (_req, res) => {
@@ -48,18 +49,34 @@ router.get('/logs', async (req, res) => {
 
 router.post('/logs/:id/retry', async (req, res) => {
   const logId = req.params.id;
+  const accountKey = getAccountKeyFromRequest(req);
 
   try {
-    const result = await replayAutomationLog(logId);
-    res.json({
+    const result = await replayAutomationLog(logId, { accountKey });
+
+    if (result.replayed) {
+      return res.json({
+        success: true,
+        message: result.message || 'Automation log successfully re-processed.',
+        ...result,
+      });
+    }
+
+    return res.json({
       success: true,
       ...result,
     });
   } catch (error) {
     console.error(`[Admin] POST /logs/${logId}/retry failed:`, error);
-    res.status(400).json({
+
+    const statusCode = error?.statusCode === 404 ? 404 : error?.statusCode === 500 ? 500 : 400;
+
+    return res.status(statusCode).json({
       success: false,
-      error: error instanceof Error ? error.message : 'Failed to replay automation log.',
+      error:
+        error instanceof Error ? error.message : 'Failed to replay automation log.',
+      details: error instanceof Error ? error.message : undefined,
+      log: error?.log ?? undefined,
     });
   }
 });

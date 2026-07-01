@@ -1,14 +1,19 @@
-const { sendBroadcastReply: sendBroadcastReplyOnce } = require('./broadcastReply');
+const { sendBroadcastReply, findNotificationById } = require('./broadcastReply');
+const { ingestPlatformMessages } = require('./chatIngestService');
 const {
   MAX_RELAY_RETRIES,
+  getLogById,
   getLogByMessageId,
-  upsertLog,
+  updateLogById,
   updateLogByMessageId,
+  upsertLog,
   isDeadLetter,
   buildRelayMessageId,
   relayBackoffMs,
   sleep,
 } = require('./automationLogsService');
+
+const RETRYABLE_STATUSES = new Set(['failed', 'dead_letter']);
 
 /**
  * Outbound relay with durable logging and bounded retries.
@@ -60,7 +65,7 @@ async function sendBroadcastReplyWithRetry(accountKey, notification, replyText, 
         errorMessage: null,
       });
 
-      const result = await sendBroadcastReplyOnce(accountKey, notification, trimmed);
+      const result = await sendBroadcastReply(accountKey, notification, trimmed);
 
       await updateLogByMessageId(messageId, {
         status: 'completed',
@@ -95,52 +100,112 @@ async function sendBroadcastReplyWithRetry(accountKey, notification, replyText, 
   }
 }
 
-async function replayAutomationLog(logId) {
-  const { getLogById, resetDeadLetterLog } = require('./automationLogsService');
-  const { findNotificationById } = require('./broadcastReply');
+async function replayOutboundLog(existing, accountKey) {
+  const notificationId = existing.payload?.notificationId;
+  const replyText = existing.payload?.replyText;
 
+  if (!notificationId || !replyText) {
+    throw new Error('Automation log is missing outbound relay payload.');
+  }
+
+  const notification = await findNotificationById(accountKey, notificationId);
+  if (!notification) {
+    throw new Error(
+      `Original notification "${notificationId}" is no longer in the feed.`,
+    );
+  }
+
+  return sendBroadcastReply(accountKey, notification, replyText);
+}
+
+async function replayInboundLog(existing, accountKey) {
+  const notification =
+    (existing.payload?.notification && existing.payload.notification) ||
+    (await findNotificationById(accountKey, existing.messageId));
+
+  if (!notification) {
+    throw new Error(
+      `Original notification "${existing.messageId}" is no longer available for replay.`,
+    );
+  }
+
+  return ingestPlatformMessages(accountKey, [notification]);
+}
+
+/**
+ * Manual admin replay for failed/dead_letter automation logs.
+ * Fetches from automation_logs, marks processing, re-runs the stored payload.
+ */
+async function replayAutomationLog(logId, options = {}) {
   const existing = await getLogById(logId);
   if (!existing) {
-    throw new Error(`Automation log not found: ${logId}`);
+    const error = new Error('Automation log not found.');
+    error.statusCode = 404;
+    throw error;
   }
-  if (existing.status !== 'dead_letter') {
-    throw new Error('Only dead_letter logs can be replayed.');
+
+  if (!RETRYABLE_STATUSES.has(existing.status)) {
+    throw new Error(
+      `Only failed or dead_letter logs can be replayed (status: ${existing.status}).`,
+    );
   }
 
-  const resetLog = await resetDeadLetterLog(logId);
+  const accountKey =
+    options.accountKey || existing.payload?.accountKey || existing.accountKey;
+  const nextRetryCount = (existing.retryCount || 0) + 1;
 
-  if (resetLog.eventType === 'outbound_relay') {
-    const accountKey = resetLog.payload?.accountKey || resetLog.accountKey;
-    const notificationId = resetLog.payload?.notificationId;
-    const replyText = resetLog.payload?.replyText;
+  console.log(
+    `[Retry Engine] Replaying log ${logId} (${existing.eventType}, retry ${nextRetryCount})`,
+  );
 
-    if (!notificationId || !replyText) {
-      throw new Error('Dead letter log is missing outbound relay payload.');
+  await updateLogById(logId, {
+    status: 'processing',
+    retryCount: nextRetryCount,
+    errorMessage: null,
+    accountKey,
+  });
+
+  try {
+    let result;
+
+    if (existing.eventType === 'outbound_relay') {
+      result = await replayOutboundLog(existing, accountKey);
+    } else if (existing.eventType === 'inbound_webhook') {
+      result = await replayInboundLog(existing, accountKey);
+    } else {
+      throw new Error(`Unsupported event type for replay: ${existing.eventType}`);
     }
 
-    const notification = await findNotificationById(accountKey, notificationId);
-    if (!notification) {
-      throw new Error(
-        `Original notification "${notificationId}" is no longer in the feed. Log reset to pending.`,
-      );
-    }
-
-    const result = await sendBroadcastReplyWithRetry(accountKey, notification, replyText, {
-      messageId: resetLog.messageId,
+    const log = await updateLogById(logId, {
+      status: 'completed',
+      errorMessage: null,
+      resultPayload: result,
+      accountKey,
     });
 
     return {
-      log: await getLogById(logId),
+      log,
       replayed: true,
       result,
+      message: 'Automation log successfully re-processed.',
     };
-  }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Replay failed.';
+    const exhausted = nextRetryCount >= MAX_RELAY_RETRIES;
 
-  return {
-    log: resetLog,
-    replayed: false,
-    message: 'Log reset to pending. Inbound events require a fresh webhook delivery.',
-  };
+    console.error(`[Retry Engine Failure] Failed to process retry for ID ${logId}:`, error);
+
+    const log = await updateLogById(logId, {
+      status: exhausted ? 'dead_letter' : 'failed',
+      errorMessage: message,
+      accountKey,
+    });
+
+    const wrapped = new Error(message);
+    wrapped.statusCode = 500;
+    wrapped.log = log;
+    throw wrapped;
+  }
 }
 
 module.exports = {
