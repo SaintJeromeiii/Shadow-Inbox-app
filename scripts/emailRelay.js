@@ -143,13 +143,17 @@ app.use(express.json({ limit: '1mb' }));
 
 function requireAdminAuth(req, res, next) {
   const adminSecret = process.env.ADMIN_SECRET;
+  const clientToken = req.headers['x-admin-token'];
+
+  // DIAGNOSTIC LOGS
+  console.log(`[Auth Debug] Secret exists on server: ${!!adminSecret}`);
+  console.log(`[Auth Debug] Server Secret Length: ${adminSecret ? adminSecret.length : 0}`);
+  console.log(`[Auth Debug] Client Token Length: ${clientToken ? clientToken.length : 0}`);
 
   if (!adminSecret) {
     console.error('[Security] ADMIN_SECRET variable is missing in environment setup!');
     return res.status(500).json({ error: 'Security configuration error.' });
   }
-
-  const clientToken = req.headers['x-admin-token'];
 
   if (!clientToken || clientToken !== adminSecret) {
     console.warn(`[Security Alert] Blocked unauthorized admin access from IP: ${req.ip}`);
