@@ -6,6 +6,7 @@ const { generateQuickReplies } = require('../quickReplyService');
 const { sendBroadcastReplyWithRetry } = require('../relayRetryService');
 const { recordDeletions } = require('../userProgressService');
 const { getCharacterIdFromRequest } = require('../characterIds');
+const { consumeAiQuota, handleQuotaHttpError } = require('../aiUsageService');
 
 const router = express.Router();
 const knowledgeBase = loadKnowledgeBase();
@@ -69,6 +70,8 @@ router.post('/generate', async (req, res) => {
       return;
     }
 
+    await consumeAiQuota(accountKey, 'llm', 1);
+
     const result = await generateQuickReplies({
       context,
       knowledgeBase,
@@ -90,6 +93,8 @@ router.post('/generate', async (req, res) => {
       warning: result.warning,
     });
   } catch (error) {
+    if (handleQuotaHttpError(res, error)) return;
+
     console.error('[Replies] POST /generate failed:', error);
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Failed to generate quick replies.',

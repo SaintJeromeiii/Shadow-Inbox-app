@@ -42,12 +42,13 @@ export default function PressStartScreen({ onStart }: PressStartScreenProps) {
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.frame}>
         <View style={styles.titleBlock}>
-          <Text style={styles.ownerLine} numberOfLines={2} adjustsFontSizeToFit>
-            JEROMEOMEGATRON&apos;S
+          <Text style={styles.kickerLine} numberOfLines={1} adjustsFontSizeToFit>
+            AI INBOX ARCADE
           </Text>
           <Text style={styles.titleLine} numberOfLines={2} adjustsFontSizeToFit>
             SHADOW INBOX
           </Text>
+          <Text style={styles.tagline}>Sort noise. Draft replies. Clear the queue.</Text>
         </View>
 
         <Pressable
@@ -92,15 +93,24 @@ const styles = StyleSheet.create({
   titleBlock: {
     width: '100%',
     alignItems: 'center',
-    gap: 14,
+    gap: 10,
   },
-  ownerLine: {
+  kickerLine: {
     fontFamily: arcadeFonts.pixel,
-    fontSize: 10,
-    lineHeight: 16,
-    letterSpacing: 0.5,
+    fontSize: 8,
+    lineHeight: 12,
+    letterSpacing: 0.8,
     textAlign: 'center',
     ...neonPinkText(),
+  },
+  tagline: {
+    fontFamily: arcadeFonts.pixel,
+    fontSize: 6,
+    lineHeight: 10,
+    textAlign: 'center',
+    color: arcadeColors.textDim,
+    letterSpacing: 0.3,
+    paddingHorizontal: 8,
   },
   titleLine: {
     fontFamily: arcadeFonts.pixel,

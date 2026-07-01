@@ -44,7 +44,7 @@ import { removeRelayAccount } from '../services/authService';
 import { hideAccountOnDevice, unhideAccountOnDevice } from '../services/accountStorage';
 import type { AccountKey } from '../types/account';
 import type { AccountProfile } from '../types/account';
-import type { FeedTab, TriagedNotification } from '../types/notification';
+import type { FeedTab, TriagedNotification, RawNotification } from '../types/notification';
 import { sendVoiceCommand } from '../services/voiceCommandService';
 import ArcadeTitle from '../components/ArcadeTitle';
 import {
@@ -66,6 +66,7 @@ import {
 } from '../utils/playerProgress';
 import { getStageDifficulty, isBossLevel } from '../utils/stageDifficulty';
 import { useCharacter } from '../context/CharacterContext';
+import { fetchDailyEngagement, recordDailyClearance, type DailyEngagement } from '../services/dailyEngagementService';
 
 interface HomeScreenProps {
   onOpenDrawer: () => void;
@@ -157,20 +158,25 @@ export default function HomeScreen({
   const [draftTexts, setDraftTexts] = useState<Record<string, string>>({});
   const [removingIds, setRemovingIds] = useState<Set<string>>(new Set());
   const [bulkSending, setBulkSending] = useState(false);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkActionBusy, setBulkActionBusy] = useState(false);
   const [accountSheetVisible, setAccountSheetVisible] = useState(false);
   const [removingAccountKey, setRemovingAccountKey] = useState<AccountKey | null>(null);
   const [focusEmailId, setFocusEmailId] = useState<string | null>(null);
   const skipNextSave = useRef(true);
   const alertedActionIdsRef = useRef<Set<string>>(new Set());
   const loadingAccountRef = useRef<AccountKey | null>(null);
+  const triageInFlightRef = useRef(false);
   const flatListRef = useRef<FlatList<TriagedNotification>>(null);
   const playerStatsRef = useRef<PlayerStats | null>(null);
   const { playDeleteSound, showActionComplete, triggerLevelUp } = useRetroFeedback();
   const { characterId } = useCharacter();
   const [playerStats, setPlayerStats] = useState<PlayerStats | null>(null);
   const [avatarReplayToken, setAvatarReplayToken] = useState(0);
+  const [dailyEngagement, setDailyEngagement] = useState<DailyEngagement | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const insets = useSafeAreaInsets();
-  const wasScreenFocusedRef = useRef(isScreenFocused);
 
   const dataSource = getNotificationDataSource(activeAccount);
   const triageMode = getTriageMode();
@@ -180,6 +186,14 @@ export default function HomeScreen({
     () => formatLastChecked(lastUpdated),
     [lastUpdated, timeTick],
   );
+
+  useEffect(() => {
+    void fetchDailyEngagement()
+      .then(setDailyEngagement)
+      .catch((error) => {
+        console.warn('[Shadow Inbox] Could not load daily engagement:', error);
+      });
+  }, [activeAccount]);
 
   useEffect(() => {
     const intervalId = setInterval(() => {
@@ -215,8 +229,8 @@ export default function HomeScreen({
   }, [activeAccount, characterId]);
 
   useEffect(() => {
-    setAvatarReplayToken((token) => token + 1);
-  }, [characterId]);
+    stopAllCharacterIntroAmbience();
+  }, []);
 
   const applyPlayerStats = useCallback(
     (nextStats: PlayerStats) => {
@@ -233,6 +247,12 @@ export default function HomeScreen({
 
   const applyLocalDeletion = useCallback(
     async (count = 1) => {
+      void recordDailyClearance(count)
+        .then(setDailyEngagement)
+        .catch((error) => {
+          console.warn('[Shadow Inbox] Failed to record daily clearance:', error);
+        });
+
       if (playerStatsRef.current) {
         const next = applyDeletionLocally(playerStatsRef.current, count);
         if (next.leveledUp) {
@@ -305,62 +325,166 @@ export default function HomeScreen({
   }, [notifications, hydrated, notificationsEnabled, activeProfile.label]);
 
   const reloadInboxFromSource = useCallback(
-    async (accountKey: AccountKey, sync = true): Promise<TriagedNotification[]> => {
+    async (
+      accountKey: AccountKey,
+      options: { sync?: boolean; seed?: RawNotification[] } = {},
+    ): Promise<TriagedNotification[]> => {
+      const { sync = false, seed: seedOverride } = options;
       skipNextSave.current = true;
 
-      let seed = getSeedNotifications(accountKey);
-      try {
-        const remote = await fetchInboxFromRelay(accountKey, sync);
-        if (remote.notifications.length > 0) {
-          seed = remote.notifications;
-        }
-      } catch (error) {
-        console.warn(
-          `[Shadow Inbox] Relay fetch failed for ${accountKey}, using bundled seed:`,
-          error,
-        );
-      }
-
+      let seed = seedOverride ?? getSeedNotifications(accountKey);
       const merged = await loadPersistedNotifications(accountKey, seed);
       return merged;
     },
     [],
   );
 
-  const applyInboxReload = useCallback(
-    async (accountKey: AccountKey, sync = true): Promise<TriagedNotification[]> => {
-      if (loadingAccountRef.current === accountKey) {
-        return notifications;
-      }
-      loadingAccountRef.current = accountKey;
+  const fetchRelayInboxSeed = useCallback(
+    async (accountKey: AccountKey, sync: boolean): Promise<RawNotification[]> => {
+      let seed = getSeedNotifications(accountKey);
 
       try {
-        const merged = await reloadInboxFromSource(accountKey, sync);
+        const remote = await fetchInboxFromRelay(accountKey, sync);
+        if (remote.notifications.length > 0) {
+          return remote.notifications;
+        }
+      } catch (error) {
+        console.warn(
+          `[Shadow Inbox] Relay ${sync ? 'sync' : 'cache'} fetch failed for ${accountKey}:`,
+          error,
+        );
+      }
+
+      return seed;
+    },
+    [],
+  );
+
+  const runTriageOnNotifications = useCallback(
+    async (
+      pending: TriagedNotification[],
+      options: { announce?: boolean } = {},
+    ) => {
+      if (pending.length === 0 || triageInFlightRef.current) {
+        return;
+      }
+
+      triageInFlightRef.current = true;
+      setProcessing(true);
+      setProgress(`0 / ${pending.length}`);
+
+      try {
+        const results = await triageNotifications(pending, (done, total) => {
+          setProgress(`${done} / ${total}`);
+        });
+
+        setNotifications((prev) => {
+          const updated = prev.map((item) => {
+            const triage = results.get(item.id);
+            return triage ? { ...item, triage } : item;
+          });
+
+          void syncShadowLabels(updated).then((labelResult) => {
+            if (!labelResult.success || !labelResult.updated?.length) {
+              return;
+            }
+
+            const labelById = new Map(labelResult.updated.map((entry) => [entry.id, entry]));
+            setNotifications((current) =>
+              current.map((item) => {
+                const labeled = labelById.get(item.id);
+                return labeled ? { ...item, ...labeled } : item;
+              }),
+            );
+          });
+
+          return updated;
+        });
+
+        setDraftTexts((prev) => {
+          const next = { ...prev };
+          for (const [id, triage] of results.entries()) {
+            if (triage.suggestedReply) {
+              next[id] = triage.suggestedReply;
+            }
+          }
+          return next;
+        });
+
+        if (options.announce !== false && results.size > 0) {
+          showActionComplete('SYNTHESIS COMPLETE!');
+        }
+      } finally {
+        triageInFlightRef.current = false;
+        setProcessing(false);
+        setProgress(null);
+      }
+    },
+    [showActionComplete],
+  );
+
+  const applyInboxReload = useCallback(
+    async (accountKey: AccountKey, sync = true): Promise<TriagedNotification[]> => {
+      loadingAccountRef.current = accountKey;
+
+      const publishInbox = (merged: TriagedNotification[]) => {
         setNotifications(merged);
         setDraftTexts(buildDraftMap(merged));
         setRemovingIds(new Set());
-        setActiveTab('action_required');
         setProcessing(false);
         setProgress(null);
         setLastUpdated(new Date());
         setHydrated(true);
         return merged;
+      };
+
+      try {
+        const cachedSeed = await fetchRelayInboxSeed(accountKey, false);
+        let merged = await reloadInboxFromSource(accountKey, { seed: cachedSeed });
+
+        if (merged.length > 0 || !sync) {
+          publishInbox(merged);
+        }
+
+        if (!sync) {
+          return merged;
+        }
+
+        const syncedSeed = await fetchRelayInboxSeed(accountKey, true);
+        if (syncedSeed.length > 0 || cachedSeed.length === 0) {
+          merged = await reloadInboxFromSource(accountKey, { seed: syncedSeed });
+        }
+
+        setActiveTab('action_required');
+        const published = publishInbox(merged);
+        const pending = published.filter((item) => !item.archived && !item.triage);
+        if (pending.length > 0) {
+          void runTriageOnNotifications(pending, { announce: false });
+        }
+        return published;
       } finally {
         loadingAccountRef.current = null;
       }
     },
-    [notifications, reloadInboxFromSource],
+    [fetchRelayInboxSeed, reloadInboxFromSource, runTriageOnNotifications],
   );
 
   useEffect(() => {
     if (!accountReady) return;
 
-    void (async () => {
-      await applyInboxReload(activeAccount, true);
-    })();
-    // Initial inbox load only — account switches reload via handleSelectAccount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accountReady]);
+    let cancelled = false;
+    setRefreshing(true);
+
+    void applyInboxReload(activeAccount, true).finally(() => {
+      if (!cancelled) {
+        setRefreshing(false);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accountReady, activeAccount, applyInboxReload]);
 
   useEffect(() => {
     onNotificationsChange?.(notifications);
@@ -394,27 +518,13 @@ export default function HomeScreen({
     }
   }, [activeAccount, applyInboxReload]);
 
-  useEffect(() => {
-    if (isScreenFocused && !wasScreenFocusedRef.current) {
-      setAvatarReplayToken((token) => token + 1);
-    }
-    wasScreenFocusedRef.current = isScreenFocused;
-  }, [isScreenFocused]);
-
   const handleSelectAccount = useCallback(
     async (accountKey: AccountKey) => {
       setAccountSheetVisible(false);
       if (accountKey === activeAccount) return;
-
       await setActiveAccount(accountKey);
-      setRefreshing(true);
-      try {
-        await applyInboxReload(accountKey, true);
-      } finally {
-        setRefreshing(false);
-      }
     },
-    [activeAccount, applyInboxReload, setActiveAccount],
+    [activeAccount, setActiveAccount],
   );
 
   const handleGoogleAccountLinked = useCallback(
@@ -423,14 +533,8 @@ export default function HomeScreen({
       await unhideAccountOnDevice(account.key);
       await refreshAccounts();
       await setActiveAccount(account.key);
-      setRefreshing(true);
-      try {
-        await applyInboxReload(account.key, true);
-      } finally {
-        setRefreshing(false);
-      }
     },
-    [applyInboxReload, refreshAccounts, setActiveAccount],
+    [refreshAccounts, setActiveAccount],
   );
 
   const { signInWithGoogle, signOutFromGoogle, isSigningIn: isGoogleSigningIn } =
@@ -526,6 +630,36 @@ export default function HomeScreen({
     });
   }, [notifications, activeTab]);
 
+  const untriagedNotifications = useMemo(
+    () => notifications.filter((n) => !n.archived && !n.triage),
+    [notifications],
+  );
+
+  const exitSelectionMode = useCallback(() => {
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+  }, []);
+
+  const toggleSelectedId = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const selectNotificationIds = useCallback((items: TriagedNotification[]) => {
+    setSelectedIds(new Set(items.map((item) => item.id)));
+  }, []);
+
+  useEffect(() => {
+    exitSelectionMode();
+  }, [activeTab, exitSelectionMode]);
+
   const tabCounts = useMemo(() => {
     const counts: Record<FeedTab, number> = {
       action_required: 0,
@@ -560,11 +694,19 @@ export default function HomeScreen({
     [notifications],
   );
 
-  const showBulkSend = actionRequiredItems.length >= 2;
+  const showBulkSend = actionRequiredItems.length >= 2 && !selectionMode;
+  const selectedCount = selectedIds.size;
+  const selectedHiddenCount = useMemo(() => {
+    const visibleIds = new Set(filteredNotifications.map((item) => item.id));
+    return [...selectedIds].filter((id) => !visibleIds.has(id)).length;
+  }, [filteredNotifications, selectedIds]);
+  const selectionBarBottomPad = Math.max(insets.bottom, 16) + 12;
   const bulkBarBottomPad = Math.max(insets.bottom, 16) + 12;
-  const listBottomPad = showBulkSend
-    ? 76 + bulkBarBottomPad
-    : 32 + Math.max(insets.bottom, 8);
+  const listBottomPad = selectionMode
+    ? 120 + selectionBarBottomPad
+    : showBulkSend
+      ? 76 + bulkBarBottomPad
+      : 32 + Math.max(insets.bottom, 8);
 
   useEffect(() => {
     if (!focusEmailId) return;
@@ -620,6 +762,27 @@ export default function HomeScreen({
           />
         ) : null}
 
+        {dailyEngagement ? (
+          <View style={styles.dailyGoalBanner}>
+            <Text style={styles.dailyGoalTitle}>DAILY CLEARANCE</Text>
+            <View style={styles.dailyGoalTrack}>
+              <View
+                style={[
+                  styles.dailyGoalFill,
+                  { width: `${Math.round(dailyEngagement.progress * 100)}%` },
+                ]}
+              />
+            </View>
+            <Text style={styles.dailyGoalMeta}>
+              {dailyEngagement.clearsToday}/{dailyEngagement.dailyGoal} cleared
+              {dailyEngagement.streakDays > 0
+                ? ` · ${dailyEngagement.streakDays} day streak`
+                : ''}
+              {dailyEngagement.goalMet ? ' · GOAL MET' : ''}
+            </Text>
+          </View>
+        ) : null}
+
         <StageDifficultyBanner
           difficulty={stageDifficulty}
           signalCount={activeFolderCount}
@@ -659,6 +822,7 @@ export default function HomeScreen({
       tabCounts,
       playerStats,
       avatarReplayToken,
+      dailyEngagement,
       stageDifficulty,
       activeFolderCount,
       activeFolderLabel,
@@ -777,57 +941,148 @@ export default function HomeScreen({
     [removeNotificationsFromFeed, playDeleteSound, applyPlayerStats, applyLocalDeletion],
   );
 
+  const handleBulkTrash = useCallback(async () => {
+    const ids = [...selectedIds];
+    if (ids.length === 0 || bulkActionBusy) {
+      return;
+    }
+
+    Alert.alert(
+      'Trash Selected',
+      `Move ${ids.length} message${ids.length === 1 ? '' : 's'} to Gmail trash?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Trash',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              setBulkActionBusy(true);
+              try {
+                const selected = notifications.filter((item) => selectedIds.has(item.id));
+                const emailIds = selected
+                  .filter((item) => item.sourceApp === 'Email')
+                  .map((item) => item.id);
+                const nonEmailIds = selected
+                  .filter((item) => item.sourceApp !== 'Email')
+                  .map((item) => item.id);
+
+                if (emailIds.length > 0) {
+                  const result = await trashEmails(emailIds);
+                  if (!result.success) {
+                    Alert.alert(
+                      'Trash Failed',
+                      result.error ?? 'Could not trash selected messages.',
+                    );
+                    return;
+                  }
+                  if (result.playerStats) {
+                    applyPlayerStats(result.playerStats);
+                  }
+                }
+
+                const removedIds = [...emailIds, ...nonEmailIds];
+                if (removedIds.length > 0) {
+                  removeNotificationsFromFeed(removedIds);
+                  playDeleteSound();
+                  if (!emailIds.length || emailIds.length < removedIds.length) {
+                    await applyLocalDeletion(removedIds.length);
+                  }
+                }
+
+                exitSelectionMode();
+              } finally {
+                setBulkActionBusy(false);
+              }
+            })();
+          },
+        },
+      ],
+    );
+  }, [
+    applyLocalDeletion,
+    applyPlayerStats,
+    bulkActionBusy,
+    exitSelectionMode,
+    notifications,
+    playDeleteSound,
+    removeNotificationsFromFeed,
+    selectedIds,
+  ]);
+
+  const handleBulkArchive = useCallback(async () => {
+    const ids = [...selectedIds];
+    if (ids.length === 0 || bulkActionBusy) {
+      return;
+    }
+
+    Alert.alert(
+      'Archive Selected',
+      `Archive ${ids.length} message${ids.length === 1 ? '' : 's'} in Gmail?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Archive',
+          onPress: () => {
+            void (async () => {
+              setBulkActionBusy(true);
+              try {
+                const selected = notifications.filter((item) => selectedIds.has(item.id));
+                const emailIds = selected
+                  .filter((item) => item.sourceApp === 'Email')
+                  .map((item) => item.id);
+                const nonEmailIds = selected
+                  .filter((item) => item.sourceApp !== 'Email')
+                  .map((item) => item.id);
+
+                if (emailIds.length > 0) {
+                  const result = await archiveEmails(emailIds);
+                  if (!result.success) {
+                    Alert.alert(
+                      'Archive Failed',
+                      result.error ?? 'Could not archive selected messages.',
+                    );
+                    return;
+                  }
+                  if (result.playerStats) {
+                    applyPlayerStats(result.playerStats);
+                  }
+                }
+
+                const removedIds = [...emailIds, ...nonEmailIds];
+                if (removedIds.length > 0) {
+                  removeNotificationsFromFeed(removedIds);
+                  playDeleteSound();
+                  if (!emailIds.length || emailIds.length < removedIds.length) {
+                    await applyLocalDeletion(removedIds.length);
+                  }
+                }
+
+                exitSelectionMode();
+              } finally {
+                setBulkActionBusy(false);
+              }
+            })();
+          },
+        },
+      ],
+    );
+  }, [
+    applyLocalDeletion,
+    applyPlayerStats,
+    bulkActionBusy,
+    exitSelectionMode,
+    notifications,
+    playDeleteSound,
+    removeNotificationsFromFeed,
+    selectedIds,
+  ]);
+
   const handleProcessFeed = useCallback(async () => {
     const pending = notifications.filter((n) => !n.triage);
     if (pending.length === 0) return;
-
-    setProcessing(true);
-    setProgress(`0 / ${pending.length}`);
-
-    try {
-      const results = await triageNotifications(pending, (done, total) => {
-        setProgress(`${done} / ${total}`);
-      });
-
-      setNotifications((prev) => {
-        const updated = prev.map((n) => {
-          const triage = results.get(n.id);
-          return triage ? { ...n, triage } : n;
-        });
-
-        void syncShadowLabels(updated).then((labelResult) => {
-          if (!labelResult.success || !labelResult.updated?.length) {
-            return;
-          }
-
-          const labelById = new Map(labelResult.updated.map((item) => [item.id, item]));
-          setNotifications((current) =>
-            current.map((item) => {
-              const labeled = labelById.get(item.id);
-              return labeled ? { ...item, ...labeled } : item;
-            }),
-          );
-        });
-
-        return updated;
-      });
-      setDraftTexts((prev) => {
-        const next = { ...prev };
-        for (const [id, triage] of results.entries()) {
-          if (triage.suggestedReply) {
-            next[id] = triage.suggestedReply;
-          }
-        }
-        return next;
-      });
-      if (results.size > 0) {
-        showActionComplete('SYNTHESIS COMPLETE!');
-      }
-    } finally {
-      setProcessing(false);
-      setProgress(null);
-    }
-  }, [notifications, showActionComplete]);
+    await runTriageOnNotifications(pending, { announce: true });
+  }, [notifications, runTriageOnNotifications]);
 
   const handleSendReply = useCallback(
     async (notification: TriagedNotification, replyText: string) => {
@@ -942,7 +1197,22 @@ export default function HomeScreen({
     applyPlayerStats,
   ]);
 
-  const renderEmpty = () => (
+  const renderEmpty = () => {
+    let subtitle = 'Pull down to refresh when new mail arrives.';
+
+    if (processing) {
+      subtitle = 'AI is sorting your inbox…';
+    } else if (syncError) {
+      subtitle = syncError;
+    } else if (unreadCount > 0) {
+      subtitle = 'New mail is syncing and will auto-triage shortly.';
+    } else if (!activeProfile.oauth && accounts.every((account) => !account.oauth)) {
+      subtitle = 'Connect Gmail in Settings to load your real inbox.';
+    } else if (activeTab === 'action_required') {
+      subtitle = 'No open cases — inbox zero for now.';
+    }
+
+    return (
     <View style={styles.emptyState}>
       <View style={styles.emptyIconWrap}>
         <Ionicons name="mail-open-outline" size={44} color="#3D4A63" />
@@ -954,13 +1224,10 @@ export default function HomeScreen({
             ? 'All caught up'
             : 'Nothing to review'}
       </Text>
-      <Text style={styles.emptySubtitle}>
-        {unreadCount > 0
-          ? 'Tap "Process Feed" to triage your inbox.'
-          : 'Pull down to refresh when new mail arrives.'}
-      </Text>
+      <Text style={styles.emptySubtitle}>{subtitle}</Text>
     </View>
-  );
+    );
+  };
 
   if (!hydrated || !accountReady) {
     return (
@@ -1051,25 +1318,116 @@ export default function HomeScreen({
       </View>
 
       <View style={styles.headerProcessRow}>
-        <Pressable
-          style={({ pressed }) => [
-            styles.processButton,
-            (processing || unreadCount === 0) && styles.processButtonDisabled,
-            pressed && !processing && styles.processButtonPressed,
-          ]}
-          onPress={() => void handleProcessFeed()}
-          disabled={processing || unreadCount === 0}
-        >
-          {processing ? (
-            <View style={styles.processingRow}>
-              <ActivityIndicator color="#FFFFFF" size="small" />
-              <Text style={styles.processButtonText}>{progress}</Text>
-            </View>
-          ) : (
-            <Text style={styles.processButtonText}>Process Feed</Text>
-          )}
-        </Pressable>
+        {selectionMode ? (
+          <View style={styles.selectionToolbar}>
+            <Pressable
+              style={({ pressed }) => [
+                styles.selectionDoneButton,
+                pressed && styles.headerUtilityPillPressed,
+              ]}
+              onPress={exitSelectionMode}
+              accessibilityLabel="Exit selection mode"
+            >
+              <Ionicons name="close" size={16} color={arcadeColors.textMuted} />
+              <Text style={styles.selectionDoneText}>Done</Text>
+            </Pressable>
+            <Text style={styles.selectionCountLabel}>
+              {selectedCount} selected
+              {selectedHiddenCount > 0
+                ? ` · ${selectedHiddenCount} off-screen`
+                : ''}
+            </Text>
+          </View>
+        ) : (
+          <Pressable
+            style={({ pressed }) => [
+              styles.processButton,
+              (processing || unreadCount === 0) && styles.processButtonDisabled,
+              pressed && !processing && styles.processButtonPressed,
+            ]}
+            onPress={() => void handleProcessFeed()}
+            disabled={processing || unreadCount === 0}
+          >
+            {processing ? (
+              <View style={styles.processingRow}>
+                <ActivityIndicator color="#FFFFFF" size="small" />
+                <Text style={styles.processButtonText}>{progress}</Text>
+              </View>
+            ) : (
+              <Text style={styles.processButtonText}>Process Feed</Text>
+            )}
+          </Pressable>
+        )}
+        {!selectionMode ? (
+          <Pressable
+            style={({ pressed }) => [
+              styles.selectModeButton,
+              pressed && styles.headerUtilityPillPressed,
+            ]}
+            onPress={() => setSelectionMode(true)}
+            accessibilityLabel="Select messages for bulk actions"
+          >
+            <Ionicons
+              name="checkbox-outline"
+              size={18}
+              color={arcadeColors.neonCyan}
+            />
+          </Pressable>
+        ) : null}
       </View>
+
+      {selectionMode ? (
+        <View style={styles.selectionChipRow}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.selectionChip,
+              pressed && styles.selectionChipPressed,
+            ]}
+            onPress={() => selectNotificationIds(filteredNotifications)}
+          >
+            <Text style={styles.selectionChipText}>
+              All ({filteredNotifications.length})
+            </Text>
+          </Pressable>
+          {untriagedNotifications.length > 0 ? (
+            <Pressable
+              style={({ pressed }) => [
+                styles.selectionChip,
+                pressed && styles.selectionChipPressed,
+              ]}
+              onPress={() => selectNotificationIds(untriagedNotifications)}
+            >
+              <Text style={styles.selectionChipText}>
+                Unread ({untriagedNotifications.length})
+              </Text>
+            </Pressable>
+          ) : null}
+          <Pressable
+            style={({ pressed }) => [
+              styles.selectionChip,
+              pressed && styles.selectionChipPressed,
+            ]}
+            onPress={() =>
+              selectNotificationIds(
+                filteredNotifications.filter((item) => Boolean(item.triage)),
+              )
+            }
+          >
+            <Text style={styles.selectionChipText}>
+              Read ({filteredNotifications.filter((item) => item.triage).length})
+            </Text>
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [
+              styles.selectionChip,
+              pressed && styles.selectionChipPressed,
+            ]}
+            onPress={() => setSelectedIds(new Set())}
+          >
+            <Text style={styles.selectionChipText}>None</Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       <AccountSwitcherSheet
         visible={accountSheetVisible}
@@ -1110,7 +1468,10 @@ export default function HomeScreen({
             onTrash={handleTrash}
             onSendReply={handleSendReply}
             isRemoving={removingIds.has(item.id)}
-            actionBusy={bulkSending}
+            actionBusy={bulkSending || bulkActionBusy}
+            selectionMode={selectionMode}
+            selected={selectedIds.has(item.id)}
+            onToggleSelect={toggleSelectedId}
           />
         )}
         contentContainerStyle={[styles.listContent, { paddingBottom: listBottomPad }]}
@@ -1155,6 +1516,45 @@ export default function HomeScreen({
             <View style={styles.bulkCountBadge}>
               <Text style={styles.bulkCountText}>{actionRequiredItems.length}</Text>
             </View>
+          </Pressable>
+        </View>
+      )}
+
+      {selectionMode && (
+        <View style={[styles.selectionActionBar, { paddingBottom: selectionBarBottomPad }]}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.selectionActionButton,
+              styles.selectionArchiveButton,
+              (bulkActionBusy || selectedCount === 0) && styles.selectionActionDisabled,
+              pressed && !bulkActionBusy && selectedCount > 0 && styles.selectionActionPressed,
+            ]}
+            onPress={() => void handleBulkArchive()}
+            disabled={bulkActionBusy || selectedCount === 0}
+          >
+            {bulkActionBusy ? (
+              <ActivityIndicator color={arcadeColors.neonCyan} size="small" />
+            ) : (
+              <Ionicons name="archive-outline" size={18} color={arcadeColors.neonCyan} />
+            )}
+            <Text style={styles.selectionArchiveText}>Archive ({selectedCount})</Text>
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [
+              styles.selectionActionButton,
+              styles.selectionTrashButton,
+              (bulkActionBusy || selectedCount === 0) && styles.selectionActionDisabled,
+              pressed && !bulkActionBusy && selectedCount > 0 && styles.selectionActionPressed,
+            ]}
+            onPress={() => void handleBulkTrash()}
+            disabled={bulkActionBusy || selectedCount === 0}
+          >
+            {bulkActionBusy ? (
+              <ActivityIndicator color={arcadeColors.neonRed} size="small" />
+            ) : (
+              <Ionicons name="trash-outline" size={18} color={arcadeColors.neonRed} />
+            )}
+            <Text style={styles.selectionTrashText}>Trash ({selectedCount})</Text>
           </Pressable>
         </View>
       )}
@@ -1219,9 +1619,10 @@ const styles = StyleSheet.create({
   },
   headerProcessRow: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
-    paddingHorizontal: 20,
-    paddingBottom: 12,
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 16,
+    marginBottom: 8,
   },
   headerUtilityPill: {
     width: 40,
@@ -1323,7 +1724,116 @@ const styles = StyleSheet.create({
     fontFamily: arcadeFonts.body,
     marginTop: 4,
   },
+  selectionToolbar: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: arcadeColors.borderCyan,
+    backgroundColor: arcadeColors.bgPanel,
+  },
+  selectionDoneButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  selectionDoneText: {
+    color: arcadeColors.textMuted,
+    fontSize: 11,
+    fontFamily: arcadeFonts.pixel,
+  },
+  selectionCountLabel: {
+    color: arcadeColors.neonCyan,
+    fontSize: 10,
+    fontFamily: arcadeFonts.pixel,
+  },
+  selectModeButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: arcadeColors.borderCyan,
+    backgroundColor: arcadeColors.bgPanel,
+  },
+  selectionChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingHorizontal: 16,
+    marginBottom: 10,
+  },
+  selectionChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: arcadeColors.borderMuted,
+    backgroundColor: arcadeColors.bgPanel,
+  },
+  selectionChipPressed: {
+    opacity: 0.85,
+  },
+  selectionChipText: {
+    color: arcadeColors.textMuted,
+    fontSize: 9,
+    fontFamily: arcadeFonts.pixel,
+    letterSpacing: 0.3,
+  },
+  selectionActionBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    backgroundColor: 'rgba(3, 8, 18, 0.96)',
+    borderTopWidth: 2,
+    borderTopColor: 'rgba(91, 141, 239, 0.35)',
+  },
+  selectionActionButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: arcadeRadii.sm,
+    borderWidth: 2,
+  },
+  selectionArchiveButton: {
+    borderColor: 'rgba(91, 141, 239, 0.55)',
+    backgroundColor: arcadeColors.bgPanel,
+  },
+  selectionTrashButton: {
+    borderColor: 'rgba(255, 138, 138, 0.55)',
+    backgroundColor: arcadeColors.bgPanel,
+  },
+  selectionActionDisabled: {
+    opacity: 0.45,
+  },
+  selectionActionPressed: {
+    opacity: 0.88,
+  },
+  selectionArchiveText: {
+    color: arcadeColors.neonCyan,
+    fontSize: 10,
+    fontFamily: arcadeFonts.pixel,
+  },
+  selectionTrashText: {
+    color: arcadeColors.neonRed,
+    fontSize: 10,
+    fontFamily: arcadeFonts.pixel,
+  },
   processButton: {
+    flex: 1,
     backgroundColor: arcadeColors.bgPanelElevated,
     paddingHorizontal: 16,
     paddingVertical: 10,
@@ -1502,6 +2012,40 @@ const styles = StyleSheet.create({
   feedListHeader: {
     gap: 0,
     marginBottom: 4,
+  },
+  dailyGoalBanner: {
+    marginHorizontal: 16,
+    marginBottom: 10,
+    borderWidth: 2,
+    borderColor: arcadeColors.borderCyan,
+    borderRadius: 8,
+    backgroundColor: 'rgba(10, 20, 40, 0.82)',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 6,
+  },
+  dailyGoalTitle: {
+    fontFamily: arcadeFonts.pixel,
+    fontSize: 6,
+    lineHeight: 10,
+    color: arcadeColors.neonCyan,
+    letterSpacing: 0.4,
+  },
+  dailyGoalTrack: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: arcadeColors.bgPanel,
+    overflow: 'hidden',
+  },
+  dailyGoalFill: {
+    height: '100%',
+    backgroundColor: arcadeColors.neonPink,
+  },
+  dailyGoalMeta: {
+    fontFamily: arcadeFonts.pixel,
+    fontSize: 6,
+    lineHeight: 10,
+    color: arcadeColors.textDim,
   },
   emptyState: {
     flex: 1,

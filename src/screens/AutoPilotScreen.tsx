@@ -8,11 +8,13 @@ import {
   ScrollView,
   ActivityIndicator,
   Switch,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import {
+  createAutoPilotRule,
   fetchAutoPilotHistory,
   fetchAutoPilotRules,
   formatAutoPilotTimestamp,
@@ -40,6 +42,11 @@ export default function AutoPilotScreen({
   const [history, setHistory] = useState<AutoPilotHistoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [togglingRuleId, setTogglingRuleId] = useState<string | null>(null);
+  const [creatingRule, setCreatingRule] = useState(false);
+  const [ruleName, setRuleName] = useState('');
+  const [ruleCondition, setRuleCondition] = useState("contains word 'fixed'");
+  const [ruleReplyText, setRuleReplyText] = useState('Thanks — marking this resolved.');
+  const [rulePlatform, setRulePlatform] = useState('any');
   const [error, setError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
@@ -67,6 +74,33 @@ export default function AutoPilotScreen({
     if (!visible) return;
     void loadData();
   }, [visible, loadData]);
+
+  const handleCreateRule = async () => {
+    if (!ruleName.trim() || !ruleCondition.trim()) {
+      setError('Rule name and condition are required.');
+      return;
+    }
+
+    setCreatingRule(true);
+    setError(null);
+    try {
+      const created = await createAutoPilotRule({
+        name: ruleName.trim(),
+        platform: rulePlatform,
+        condition: ruleCondition.trim(),
+        action: 'reply',
+        replyText: ruleReplyText.trim(),
+        enabled: true,
+      });
+      setRules((prev) => [...prev, created]);
+      setRuleName('');
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (createError) {
+      setError(createError instanceof Error ? createError.message : 'Could not create rule.');
+    } finally {
+      setCreatingRule(false);
+    }
+  };
 
   const handleToggleRule = async (rule: AutoPilotRule, enabled: boolean) => {
     setTogglingRuleId(rule.id);
@@ -115,6 +149,52 @@ export default function AutoPilotScreen({
             showsVerticalScrollIndicator={false}
           >
             {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+            <View style={styles.builderCard}>
+              <Text style={styles.sectionTitle}>CREATE RULE</Text>
+              <Text style={styles.sectionHint}>
+                Example: If Slack message contains "fixed", auto-reply and archive.
+              </Text>
+              <TextInput
+                style={styles.input}
+                value={ruleName}
+                onChangeText={setRuleName}
+                placeholder="Rule name"
+                placeholderTextColor={arcadeColors.textDim}
+              />
+              <TextInput
+                style={styles.input}
+                value={rulePlatform}
+                onChangeText={setRulePlatform}
+                placeholder="Platform: any, email, slack, discord"
+                placeholderTextColor={arcadeColors.textDim}
+                autoCapitalize="none"
+              />
+              <TextInput
+                style={styles.input}
+                value={ruleCondition}
+                onChangeText={setRuleCondition}
+                placeholder="Condition"
+                placeholderTextColor={arcadeColors.textDim}
+              />
+              <TextInput
+                style={[styles.input, styles.inputMultiline]}
+                value={ruleReplyText}
+                onChangeText={setRuleReplyText}
+                placeholder="Auto-reply text"
+                placeholderTextColor={arcadeColors.textDim}
+                multiline
+              />
+              <Pressable
+                style={[styles.createButton, creatingRule && styles.createButtonDisabled]}
+                onPress={() => void handleCreateRule()}
+                disabled={creatingRule}
+              >
+                <Text style={styles.createButtonText}>
+                  {creatingRule ? 'CREATING…' : 'ADD RULE'}
+                </Text>
+              </Pressable>
+            </View>
 
             <View style={styles.sectionTitleRow}>
               <ArcadeRobotIcon size={16} color={arcadeColors.neonCyan} />
@@ -408,5 +488,44 @@ const styles = StyleSheet.create({
     color: '#9DB9F0',
     fontSize: 12,
     fontStyle: 'italic',
+  },
+  builderCard: {
+    backgroundColor: '#10141D',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#2E3A52',
+    padding: 14,
+    gap: 8,
+    marginBottom: 8,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#2E3A52',
+    borderRadius: 10,
+    backgroundColor: '#0B0F17',
+    color: '#E8ECF5',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+  },
+  inputMultiline: {
+    minHeight: 72,
+    textAlignVertical: 'top',
+  },
+  createButton: {
+    marginTop: 4,
+    backgroundColor: arcadeColors.neonCyan,
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  createButtonDisabled: {
+    opacity: 0.6,
+  },
+  createButtonText: {
+    color: arcadeColors.bgDeep,
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
 });

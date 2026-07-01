@@ -5,6 +5,7 @@ const path = require('path');
 const multer = require('multer');
 const { resolveAccountKey } = require('../accounts');
 const { processVoiceCommand } = require('../voiceCommandService');
+const { consumeAiQuota, handleQuotaHttpError } = require('../aiUsageService');
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -53,6 +54,8 @@ router.post('/voice-command', upload.single('audio'), async (req, res) => {
       req.headers['x-account-key'] || req.body?.accountKey || 'personal',
     );
 
+    await consumeAiQuota(accountKey, 'llm', 1);
+
     const result = await processVoiceCommand({
       accountKey,
       emailId,
@@ -70,6 +73,8 @@ router.post('/voice-command', upload.single('audio'), async (req, res) => {
       memoryContext: result.memoryContext,
     });
   } catch (error) {
+    if (handleQuotaHttpError(res, error)) return;
+
     console.error('[VoiceCommand] Failed:', error);
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Voice command processing failed.',

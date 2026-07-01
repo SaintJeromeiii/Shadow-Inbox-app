@@ -3,7 +3,7 @@ import type { AccountKey } from '../types/account';
 import { getRelayUrl } from './emailService';
 
 const REQUEST_TIMEOUT_MS = 20_000;
-const SYNC_REQUEST_TIMEOUT_MS = 120_000;
+const SYNC_REQUEST_TIMEOUT_MS = 65_000;
 
 export interface InboxFetchResult {
   accountKey: AccountKey;

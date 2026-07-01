@@ -13,6 +13,7 @@
 require('dotenv').config();
 
 const os = require('os');
+const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const nodemailer = require('nodemailer');
@@ -22,11 +23,12 @@ const { readNotifications, removeNotificationIds } = require('../backend/notific
 const { getAccount, listAccounts, resolveAccountKey } = require('../backend/accounts');
 const { fetchNotifications } = require('./fetchNotifications');
 const { completeGoogleOAuth, getValidAccessToken } = require('../backend/googleOAuth');
-const { toPublicProfile, getOAuthAccount, removeOAuthAccount } = require('../backend/userTokens');
+const { toPublicProfile, getOAuthAccount, removeOAuthAccount, hydrateOAuthTokenStore } = require('../backend/userTokens');
 const { ensureShadowLabelSet } = require('../backend/shadowLabels');
 const { applyShadowLabelsToNotification } = require('../backend/shadowLabels');
 const { writeNotifications } = require('../backend/notificationFeed');
 const { redraftReply } = require('../backend/redraftService');
+const { consumeAiQuota, handleQuotaHttpError } = require('../backend/aiUsageService');
 const {
   registerDevicePushToken,
   removeDevicePushToken,
@@ -46,6 +48,7 @@ const timelineRouter = require('../backend/routes/timeline');
 const firewallRouter = require('../backend/routes/firewall');
 const repliesRouter = require('../backend/routes/replies');
 const userRouter = require('../backend/routes/user');
+const triageRouter = require('../backend/routes/triage');
 const adminRouter = require('../backend/routes/admin');
 const { recordDeletions, getPlayerStats } = require('../backend/userProgressService');
 const { getCharacterIdFromRequest } = require('../backend/characterIds');
@@ -133,6 +136,7 @@ async function createTransporter(accountKey) {
 }
 
 const app = express();
+app.use('/docs', express.static(path.join(__dirname, '..', 'docs')));
 app.use(cors());
 app.post(
   '/api/broadcast/webhooks/slack',
@@ -177,6 +181,7 @@ function mountApiRouters(expressApp) {
   expressApp.use('/api/firewall', firewallRouter);
   expressApp.use('/api/replies', repliesRouter);
   expressApp.use('/api/user', userRouter);
+  expressApp.use('/api/triage', triageRouter);
   expressApp.use('/api/admin', requireAdminAuth, adminRouter);
 }
 
@@ -370,10 +375,26 @@ app.post('/api/auth/google/callback', async (req, res) => {
 app.get('/api/emails', async (req, res) => {
   const accountKey = getAccountKeyFromRequest(req);
   const shouldSync = req.query.sync === 'true' || req.query.sync === '1';
+  const SYNC_BUDGET_MS = 55_000;
 
   try {
     if (shouldSync) {
-      await fetchNotifications({ accountKey, silent: true });
+      try {
+        await Promise.race([
+          fetchNotifications({ accountKey, silent: true }),
+          new Promise((_, reject) => {
+            setTimeout(
+              () => reject(new Error('Inbox sync timed out before Gmail fetch completed')),
+              SYNC_BUDGET_MS,
+            );
+          }),
+        ]);
+      } catch (error) {
+        console.warn(
+          `[Relay] Inbox sync incomplete for ${accountKey}:`,
+          error instanceof Error ? error.message : error,
+        );
+      }
     }
 
     const notifications = await readNotifications(accountKey);
@@ -468,6 +489,8 @@ app.post('/api/emails/redraft', async (req, res) => {
 
   try {
     const accountKey = getAccountKeyFromRequest(req);
+    await consumeAiQuota(accountKey, 'llm', 1);
+
     const result = await redraftReply({
       accountKey,
       emailId: resolvedId,
@@ -485,6 +508,8 @@ app.post('/api/emails/redraft', async (req, res) => {
       memoryContext: result.memoryContext,
     });
   } catch (error) {
+    if (handleQuotaHttpError(res, error)) return;
+
     console.error('[Relay] redraft failed:', error);
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Failed to redraft reply.',
@@ -718,6 +743,13 @@ function getLanAddress() {
 function startServer(options = {}) {
   const port = Number(options.port || process.env.PORT || process.env.EMAIL_RELAY_PORT || 3000);
   const host = options.host || process.env.EMAIL_RELAY_HOST || '0.0.0.0';
+
+  void hydrateOAuthTokenStore().catch((error) => {
+    console.warn(
+      '[Relay] OAuth token hydrate failed:',
+      error instanceof Error ? error.message : error,
+    );
+  });
 
   const server = app.listen(port, host, () => {
     const lanIp = getLanAddress();

@@ -3,6 +3,7 @@ const {
   hasTransactionForNotification,
   VALID_PROJECTS,
 } = require('./financeLedger');
+const { tryConsumeAiQuota } = require('./aiUsageService');
 
 const API_KEY =
   process.env.OPENAI_API_KEY || process.env.EXPO_PUBLIC_OPENAI_API_KEY || '';
@@ -158,13 +159,18 @@ async function maybeExtractFinance(accountKey, notification) {
   let parsed = null;
 
   if (API_KEY && !API_KEY.includes('your_')) {
-    try {
-      parsed = await callFinanceExtraction(notification);
-    } catch (error) {
-      console.warn(
-        `[Finance] LLM extraction failed for ${notification.id}:`,
-        error instanceof Error ? error.message : error,
-      );
+    const allowed = await tryConsumeAiQuota(accountKey, 'llm', 1);
+    if (allowed) {
+      try {
+        parsed = await callFinanceExtraction(notification);
+      } catch (error) {
+        console.warn(
+          `[Finance] LLM extraction failed for ${notification.id}:`,
+          error instanceof Error ? error.message : error,
+        );
+        parsed = fallbackExtraction(notification);
+      }
+    } else {
       parsed = fallbackExtraction(notification);
     }
   } else {

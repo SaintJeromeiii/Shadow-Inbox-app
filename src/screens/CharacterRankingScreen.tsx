@@ -18,6 +18,7 @@ import {
   getUnlockedCharacterIds,
   getUnlockedCharacters,
 } from '../constants/characters';
+import { SHOW_COMING_SOON_FIGHTERS } from '../data/characters';
 import { fetchAllCharacterStats } from '../services/userProgressService';
 import type { CharacterId, CharacterRegistryEntry } from '../types/character';
 import type { PlayerStats } from '../types/userProgress';
@@ -160,8 +161,10 @@ export default function CharacterRankingScreen({ onOpenDrawer }: CharacterRankin
             );
           })}
 
-          <Text style={[styles.sectionLabel, styles.sectionLabelSpaced]}>INCOMING OPERATIVES</Text>
-          {comingSoonFighters.map((entry) => (
+          {SHOW_COMING_SOON_FIGHTERS && comingSoonFighters.length > 0 ? (
+            <>
+              <Text style={[styles.sectionLabel, styles.sectionLabelSpaced]}>INCOMING OPERATIVES</Text>
+              {comingSoonFighters.map((entry) => (
             <View key={entry.id} style={styles.rankCard}>
               <View style={[styles.rankBadge, styles.rankBadgeMuted]}>
                 <Text style={styles.rankTextMuted}>—</Text>
@@ -186,6 +189,8 @@ export default function CharacterRankingScreen({ onOpenDrawer }: CharacterRankin
               </View>
             </View>
           ))}
+            </>
+          ) : null}
         </ScrollView>
       )}
     </SafeAreaView>

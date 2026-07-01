@@ -142,10 +142,6 @@ export async function startCharacterIntroAmbience(
 
   try {
     await ensureAudioMode();
-    if (!introActiveSessions.has(sessionId)) {
-      return;
-    }
-
     const player = getPlayer(config.key);
     player.loop = true;
     player.volume = config.volume;
@@ -154,6 +150,11 @@ export async function startCharacterIntroAmbience(
   } catch (error) {
     introActiveSessions.delete(sessionId);
     console.warn('[RetroSound] Intro ambience failed:', error);
+    return;
+  }
+
+  if (!introActiveSessions.has(sessionId)) {
+    pauseIntroPlayer(config.key);
   }
 }
 
@@ -165,6 +166,13 @@ export function stopCharacterIntroAmbience(sessionId: string): void {
 
   introActiveSessions.delete(sessionId);
   pauseIntroPlayer(key);
+}
+
+/** Silence any fighter-preview loops when entering the main inbox. */
+export function stopAllCharacterIntroAmbience(): void {
+  for (const sessionId of [...introActiveSessions.keys()]) {
+    stopCharacterIntroAmbience(sessionId);
+  }
 }
 
 export async function preloadRetroSounds(): Promise<void> {

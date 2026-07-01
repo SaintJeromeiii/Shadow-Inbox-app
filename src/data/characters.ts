@@ -21,7 +21,8 @@ export const PLAYABLE_CHARACTERS: PlayableCharacter[] = CHARACTER_REGISTRY.filte
   maxVisualTier: entry.maxVisualTier,
 }));
 
-export const LOCKED_ROSTER_SLOTS = 1;
+export const LOCKED_ROSTER_SLOTS = 0;
+export const SHOW_COMING_SOON_FIGHTERS = false;
 
 export function getCharacterById(id: CharacterId): PlayableCharacter {
   const entry = getCharacterRegistryEntry(id);

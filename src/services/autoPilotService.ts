@@ -1,4 +1,4 @@
-import { getRelayUrl, relayFetch } from './emailService';
+import { getRelayUrl, relayFetch, relayHeaders } from './emailService';
 import type { AutoPilotHistoryEntry, AutoPilotRule } from '../types/autoPilot';
 
 async function parseRelayJson<T extends { error?: string }>(
@@ -27,7 +27,10 @@ export async function fetchAutoPilotRules(): Promise<{
   rules: AutoPilotRule[];
   activeCount: number;
 }> {
-  const response = await relayFetch('/api/auto-pilot/rules', { method: 'GET' });
+  const response = await relayFetch('/api/auto-pilot/rules', {
+    method: 'GET',
+    headers: relayHeaders(),
+  });
   if (!response.ok) {
     throw new Error(`Failed to load auto-pilot rules (${response.status})`);
   }
@@ -43,13 +46,35 @@ export async function fetchAutoPilotRules(): Promise<{
   };
 }
 
+export async function createAutoPilotRule(input: {
+  name: string;
+  platform: string;
+  condition: string;
+  action: 'reply' | 'archive';
+  replyText?: string;
+  enabled?: boolean;
+}): Promise<AutoPilotRule> {
+  const response = await relayFetch('/api/auto-pilot/rules', {
+    method: 'POST',
+    headers: relayHeaders(),
+    body: JSON.stringify(input),
+  });
+
+  const data = await parseRelayJson<{ rule?: AutoPilotRule; error?: string }>(response);
+  if (!response.ok || !data.rule) {
+    throw new Error(data.error ?? `Failed to create rule (${response.status})`);
+  }
+
+  return data.rule;
+}
+
 export async function toggleAutoPilotRule(
   ruleId: string,
   enabled: boolean,
 ): Promise<AutoPilotRule> {
   const response = await relayFetch(`/api/auto-pilot/rules/${encodeURIComponent(ruleId)}/toggle`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: relayHeaders(),
     body: JSON.stringify({ enabled }),
   });
 

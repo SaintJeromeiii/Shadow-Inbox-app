@@ -59,6 +59,9 @@ interface FeedCardProps {
   voiceControl: FeedVoiceRecordingControl;
   isRemoving?: boolean;
   actionBusy?: boolean;
+  selectionMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (id: string) => void;
 }
 
 function formatTimestamp(iso: string): string {
@@ -159,6 +162,9 @@ export default function FeedCard({
   voiceControl,
   isRemoving = false,
   actionBusy = false,
+  selectionMode = false,
+  selected = false,
+  onToggleSelect,
 }: FeedCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [sending, setSending] = useState(false);
@@ -405,6 +411,10 @@ export default function FeedCard({
     <Animated.View style={{ opacity: fadeAnim }}>
     <Pressable
       onPress={() => {
+        if (selectionMode) {
+          onToggleSelect?.(notification.id);
+          return;
+        }
         if (!isEditing) {
           setExpanded((prev) => !prev);
         }
@@ -412,11 +422,30 @@ export default function FeedCard({
       style={({ pressed }) => [
         styles.card,
         pressed && !isEditing && styles.cardPressed,
-        expanded && styles.cardExpanded,
+        expanded && !selectionMode && styles.cardExpanded,
+        selectionMode && selected && styles.cardSelected,
       ]}
     >
       <View style={styles.cardTopRow}>
-        <View style={styles.cardTopLeft}>
+        {selectionMode ? (
+          <Pressable
+            style={styles.selectionCheckbox}
+            onPress={(e) => {
+              stopCardPress(e);
+              onToggleSelect?.(notification.id);
+            }}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: selected }}
+            accessibilityLabel={selected ? 'Deselect message' : 'Select message'}
+          >
+            <Ionicons
+              name={selected ? 'checkbox' : 'square-outline'}
+              size={22}
+              color={selected ? arcadeColors.neonCyan : arcadeColors.textMuted}
+            />
+          </Pressable>
+        ) : null}
+        <View style={[styles.cardTopLeft, selectionMode && styles.cardTopLeftWithSelect]}>
           <View
             style={[
               styles.sourceTag,
@@ -526,7 +555,7 @@ export default function FeedCard({
         <Text style={styles.timestamp}>{formatTimestamp(notification.timestamp)}</Text>
       </View>
 
-      {isEmail && (
+      {isEmail && !selectionMode && (
         <View style={styles.quickActions}>
           <Pressable
             style={({ pressed }) => [
@@ -946,6 +975,10 @@ const styles = StyleSheet.create({
     borderColor: arcadeColors.borderPink,
     backgroundColor: arcadeColors.bgPanelElevated,
   },
+  cardSelected: {
+    borderColor: arcadeColors.neonCyan,
+    backgroundColor: 'rgba(91, 141, 239, 0.08)',
+  },
   cardTopRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -957,6 +990,13 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     gap: 8,
+  },
+  cardTopLeftWithSelect: {
+    flex: 1,
+  },
+  selectionCheckbox: {
+    paddingTop: 2,
+    paddingRight: 4,
   },
   labelRow: {
     flexDirection: 'row',

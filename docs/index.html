@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Shadow Inbox</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #060b14;
+      --panel: #10182a;
+      --cyan: #5ef0ff;
+      --pink: #ff4fd8;
+      --text: #d9e2f2;
+      --muted: #8b93a8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, sans-serif;
+      background: radial-gradient(circle at top, #10203a 0%, var(--bg) 55%);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    .wrap { max-width: 760px; margin: 0 auto; padding: 48px 20px 72px; }
+    .badge {
+      display: inline-block;
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      color: var(--pink);
+      margin-bottom: 12px;
+    }
+    h1 {
+      font-size: clamp(2rem, 6vw, 3rem);
+      line-height: 1.1;
+      margin: 0 0 12px;
+      color: var(--cyan);
+    }
+    .lead { font-size: 1.125rem; color: var(--muted); max-width: 56ch; }
+    .grid {
+      display: grid;
+      gap: 16px;
+      margin-top: 36px;
+    }
+    .card {
+      background: rgba(16, 24, 42, 0.9);
+      border: 1px solid #2a3b5c;
+      border-radius: 14px;
+      padding: 18px 20px;
+    }
+    .card h2 { margin: 0 0 8px; font-size: 1rem; color: var(--cyan); }
+    .card p { margin: 0; color: var(--muted); }
+    a { color: var(--cyan); }
+    .cta {
+      display: inline-block;
+      margin-top: 28px;
+      padding: 12px 18px;
+      border-radius: 10px;
+      background: var(--pink);
+      color: #061018;
+      text-decoration: none;
+      font-weight: 700;
+    }
+    footer { margin-top: 48px; color: var(--muted); font-size: 14px; }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <div class="badge">AI INBOX ARCADE</div>
+    <h1>Shadow Inbox</h1>
+    <p class="lead">
+      Sort noise from signal, draft replies in your voice, and clear your inbox like an arcade run.
+      Gmail-powered triage runs securely on our server — your API keys stay off your phone.
+    </p>
+
+    <div class="grid">
+      <section class="card">
+        <h2>Auto-triage</h2>
+        <p>Mail is categorized into open cases, intel, and archived noise with urgency scores.</p>
+      </section>
+      <section class="card">
+        <h2>Send-ready drafts</h2>
+        <p>AI writes concise replies using your operator profile and Knowledge Core.</p>
+      </section>
+      <section class="card">
+        <h2>Arcade progression</h2>
+        <p>Clear messages to level up your fighter, hit daily goals, and keep streaks alive.</p>
+      </section>
+    </div>
+
+    <a class="cta" href="privacy.html">Privacy Policy</a>
+
+    <footer>
+      <p>Shadow Inbox · Android beta · <a href="privacy.html">Privacy</a></p>
+    </footer>
+  </main>
+</body>
+</html>

@@ -6,6 +6,7 @@ const {
   formatStoredBriefing,
 } = require('../briefingService');
 const { getLatestExecutiveBrief } = require('../executiveBriefsLedger');
+const { consumeAiQuota, handleQuotaHttpError } = require('../aiUsageService');
 
 const router = express.Router();
 const knowledgeBase = loadKnowledgeBase();
@@ -46,12 +47,16 @@ router.get('/latest', async (req, res) => {
 async function handleGenerate(req, res) {
   const accountKey = getAccountKeyFromRequest(req);
   const triageByAccount = req.body?.triageByAccount ?? null;
+  const quotaAccountKey =
+    !accountKey || accountKey === 'all' ? 'personal' : accountKey;
   const scopedAccountKey =
     !accountKey || accountKey === 'all' || accountKey === 'personal'
       ? null
       : accountKey;
 
   try {
+    await consumeAiQuota(quotaAccountKey, 'llm', 1);
+
     const briefing = await generateExecutiveBrief({
       accountKey: scopedAccountKey,
       triageByAccount,
@@ -64,6 +69,8 @@ async function handleGenerate(req, res) {
 
     res.status(200).json(briefing);
   } catch (error) {
+    if (handleQuotaHttpError(res, error)) return;
+
     console.error('[Briefing] generate failed:', error);
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Failed to generate briefing.',

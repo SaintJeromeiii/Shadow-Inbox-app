@@ -1,12 +1,16 @@
 const fs = require('fs');
 const path = require('path');
 const { DATA_DIR } = require('./accountsConstants');
+const { getSupabase } = require('./supabaseClient');
 
 const TOKENS_PATH = path.join(__dirname, 'user_tokens.json');
 
 const ACCENT_COLORS = ['#5B8DEF', '#6EE7A0', '#FFB347', '#C084FC', '#FF8A8A', '#67E8F9'];
 
-function readTokenStore() {
+let memoryStore = null;
+let hydratePromise = null;
+
+function readTokenStoreFromFile() {
   try {
     const raw = fs.readFileSync(TOKENS_PATH, 'utf8');
     const parsed = JSON.parse(raw);
@@ -18,8 +22,97 @@ function readTokenStore() {
   }
 }
 
-function writeTokenStore(store) {
+function writeTokenStoreToFile(store) {
   fs.writeFileSync(TOKENS_PATH, `${JSON.stringify(store, null, 2)}\n`, 'utf8');
+}
+
+async function persistTokenStoreToSupabase(store) {
+  const supabase = getSupabase();
+  if (!supabase) {
+    return;
+  }
+
+  const rows = Object.entries(store.accounts || {}).map(([accountKey, payload]) => ({
+    account_key: accountKey,
+    email: payload.email,
+    payload,
+    updated_at: new Date().toISOString(),
+  }));
+
+  if (rows.length === 0) {
+    return;
+  }
+
+  const { error } = await supabase.from('oauth_accounts').upsert(rows, {
+    onConflict: 'account_key',
+  });
+
+  if (error) {
+    console.warn('[OAuth] Supabase token persist failed:', error.message);
+  }
+}
+
+async function deleteOAuthAccountFromSupabase(accountKey) {
+  const supabase = getSupabase();
+  if (!supabase) {
+    return;
+  }
+
+  const { error } = await supabase.from('oauth_accounts').delete().eq('account_key', accountKey);
+  if (error) {
+    console.warn(`[OAuth] Supabase delete failed for ${accountKey}:`, error.message);
+  }
+}
+
+function readTokenStore() {
+  if (!memoryStore) {
+    memoryStore = readTokenStoreFromFile();
+  }
+  return memoryStore;
+}
+
+function writeTokenStore(store) {
+  memoryStore = store;
+  writeTokenStoreToFile(store);
+  void persistTokenStoreToSupabase(store);
+}
+
+async function hydrateOAuthTokenStore() {
+  if (hydratePromise) {
+    return hydratePromise;
+  }
+
+  hydratePromise = (async () => {
+    const fileStore = readTokenStoreFromFile();
+    memoryStore = fileStore;
+
+    const supabase = getSupabase();
+    if (!supabase) {
+      return fileStore;
+    }
+
+    const { data, error } = await supabase
+      .from('oauth_accounts')
+      .select('account_key, email, payload');
+
+    if (error) {
+      console.warn('[OAuth] Supabase hydrate failed:', error.message);
+      return fileStore;
+    }
+
+    const accounts = { ...fileStore.accounts };
+    for (const row of data || []) {
+      if (row?.account_key && row?.payload) {
+        accounts[row.account_key] = row.payload;
+      }
+    }
+
+    memoryStore = { accounts };
+    writeTokenStoreToFile(memoryStore);
+    return memoryStore;
+  })();
+
+  return hydratePromise;
 }
 
 const {
@@ -158,6 +251,7 @@ function removeOAuthAccount(accountKey) {
 
   delete store.accounts[accountKey];
   writeTokenStore(store);
+  void deleteOAuthAccountFromSupabase(accountKey);
   return existing;
 }
 
@@ -171,4 +265,5 @@ module.exports = {
   updateOAuthTokens,
   removeOAuthAccount,
   toPublicProfile,
+  hydrateOAuthTokenStore,
 };

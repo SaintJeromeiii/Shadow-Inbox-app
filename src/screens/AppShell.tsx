@@ -10,9 +10,11 @@ import FirewallSettings from './FirewallSettings';
 import CharacterSelectScreen from './CharacterSelectScreen';
 import CharacterRankingScreen from './CharacterRankingScreen';
 import QuantumRealmTransitionScreen from './QuantumRealmTransitionScreen';
+import SettingsScreen from './SettingsScreen';
 import SideDeckDrawer from '../components/SideDeckDrawer';
 import { useAccount } from '../context/AccountContext';
 import { useCharacter } from '../context/CharacterContext';
+import { useRegisterPushNavigation } from '../context/PushNavigationContext';
 import { shouldEnterQuantumRealm } from '../utils/characterTransition';
 import type { DrawerRoute } from '../types/navigation';
 
@@ -34,7 +36,7 @@ function ScreenSlot({
 }
 
 export default function AppShell() {
-  const { activeAccount } = useAccount();
+  const { activeAccount, accounts, setActiveAccount } = useAccount();
   const { characterId, selectCharacter } = useCharacter();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [route, setRoute] = useState<DrawerRoute>('play_stage');
@@ -58,6 +60,23 @@ export default function AppShell() {
     setRoute('play_stage');
     setDrawerOpen(false);
   }, []);
+
+  useRegisterPushNavigation(
+    useCallback(
+      (payload) => {
+        if (
+          payload.accountKey &&
+          payload.accountKey !== activeAccount &&
+          accounts.some((account) => account.key === payload.accountKey)
+        ) {
+          void setActiveAccount(payload.accountKey);
+        }
+
+        handleJumpToEmail(payload.notificationId);
+      },
+      [accounts, activeAccount, handleJumpToEmail, setActiveAccount],
+    ),
+  );
 
   const goToPlayStage = useCallback(() => {
     setRoute('play_stage');
@@ -145,6 +164,15 @@ export default function AppShell() {
       <ScreenSlot active={route === 'admin_logs'}>
         <AdminLogsScreen
           visible={route === 'admin_logs'}
+          variant="screen"
+          onClose={goToPlayStage}
+          onOpenDrawer={openDrawer}
+        />
+      </ScreenSlot>
+
+      <ScreenSlot active={route === 'settings'}>
+        <SettingsScreen
+          visible={route === 'settings'}
           variant="screen"
           onClose={goToPlayStage}
           onOpenDrawer={openDrawer}

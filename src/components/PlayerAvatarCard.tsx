@@ -14,6 +14,7 @@ interface PlayerAvatarCardProps {
   stats: PlayerStats;
   inboxCount?: number;
   enableIntro?: boolean;
+  enableIntroAudio?: boolean;
   replayToken?: number;
 }
 
@@ -21,6 +22,7 @@ export default function PlayerAvatarCard({
   stats,
   inboxCount = 0,
   enableIntro = false,
+  enableIntroAudio = false,
   replayToken = 0,
 }: PlayerAvatarCardProps) {
   const { character, characterId } = useCharacter();
@@ -49,6 +51,7 @@ export default function PlayerAvatarCard({
           <DynamicAvatar
             inboxCount={inboxCount}
             enableIntro={enableIntro}
+            enableIntroAudio={enableIntroAudio}
             replayToken={replayToken}
           />
         </View>

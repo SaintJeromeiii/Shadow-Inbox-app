@@ -10,7 +10,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
-import DynamicAvatar from '../components/DynamicAvatar';
+import DynamicAvatar, { AVATAR_ASPECT_RATIO } from '../components/DynamicAvatar';
 import { ArcadeHamburgerIcon } from '../components/ArcadeIcons';
 import { useAccount } from '../context/AccountContext';
 import { getCharacterRegistryEntry } from '../constants/characters';
@@ -19,6 +19,10 @@ import {
   PLAYABLE_CHARACTERS,
 } from '../data/characters';
 import { fetchAllCharacterStats } from '../services/userProgressService';
+import {
+  startCharacterIntroAmbience,
+  stopCharacterIntroAmbience,
+} from '../services/retroSoundService';
 import type { CharacterId } from '../types/character';
 import type { PlayerStats } from '../types/userProgress';
 import { buildPlayerStats } from '../utils/playerProgress';
@@ -98,6 +102,27 @@ export default function CharacterSelectScreen({
   }, [loadProgress]);
 
   useEffect(() => {
+    if (variant !== 'intro') {
+      return;
+    }
+
+    const sessionId = `fighter-select-${selectedId}`;
+    void startCharacterIntroAmbience(selectedId, sessionId);
+
+    return () => {
+      stopCharacterIntroAmbience(sessionId);
+    };
+  }, [variant, selectedId]);
+
+  useEffect(() => {
+    if (variant !== 'intro') {
+      return;
+    }
+
+    setPreviewToken((token) => token + 1);
+  }, [variant]);
+
+  useEffect(() => {
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(blink, {
@@ -147,19 +172,42 @@ export default function CharacterSelectScreen({
         </View>
       ) : null}
 
+      <View style={styles.headerBlock}>
+        <Text style={styles.header}>
+          {isSwitchMode ? 'CHANGE FIGHTER' : 'SELECT YOUR FIGHTER'}
+        </Text>
+        <Text style={styles.subheader}>Each operative tracks XP separately</Text>
+        <View style={styles.rule} />
+      </View>
+
+      <View style={styles.previewPanel}>
+        <View style={styles.previewFrame} collapsable={false}>
+          <DynamicAvatar
+            characterId={selectedId}
+            visualTier={1}
+            enableIntro
+            enableIntroAudio={false}
+            holdIntro={variant === 'intro'}
+            replayToken={previewToken}
+          />
+        </View>
+
+        <Text style={styles.codename}>{selectedCharacter.codename}</Text>
+        <Text style={styles.tierTitle}>{previewVisualLabel}</Text>
+        <Text style={styles.ethnicityLine}>
+          {selectedRegistry.ethnicity.toUpperCase()} · {selectedRegistry.gender.toUpperCase()}
+        </Text>
+        <Text style={styles.tagline}>&quot;{selectedCharacter.tagline}&quot;</Text>
+      </View>
+
       <ScrollView
+        style={styles.scrollArea}
         contentContainerStyle={[
           styles.scrollContent,
           { paddingBottom: Math.max(insets.bottom, 16) + 20 },
         ]}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.header}>
-          {isSwitchMode ? 'CHANGE FIGHTER' : 'SELECT YOUR FIGHTER'}
-        </Text>
-        <Text style={styles.subheader}>Each operative tracks XP separately</Text>
-        <View style={styles.rule} />
-
         <View style={styles.rosterRow}>
           {PLAYABLE_CHARACTERS.map((character) => {
             const isSelected = character.id === selectedId;
@@ -205,43 +253,25 @@ export default function CharacterSelectScreen({
           ))}
         </View>
 
-        <View style={styles.previewPanel}>
-          <View style={styles.previewFrame}>
-            <DynamicAvatar
-              characterId={selectedId}
-              visualTier={1}
-              enableIntro
-              replayToken={previewToken}
-            />
+        <FighterProgressBar
+          label="OPERATIVE XP TRACK"
+          stats={selectedStats}
+        />
+
+        <View style={styles.statsRow}>
+          <View style={styles.statPill}>
+            <Text style={styles.statLabel}>CLEARS</Text>
+            <Text style={styles.statValue}>{selectedStats.totalDeletions}</Text>
           </View>
-
-          <Text style={styles.codename}>{selectedCharacter.codename}</Text>
-          <Text style={styles.tierTitle}>{previewVisualLabel}</Text>
-          <Text style={styles.ethnicityLine}>
-            {selectedRegistry.ethnicity.toUpperCase()} · {selectedRegistry.gender.toUpperCase()}
-          </Text>
-          <Text style={styles.tagline}>&quot;{selectedCharacter.tagline}&quot;</Text>
-
-          <FighterProgressBar
-            label="OPERATIVE XP TRACK"
-            stats={selectedStats}
-          />
-
-          <View style={styles.statsRow}>
-            <View style={styles.statPill}>
-              <Text style={styles.statLabel}>CLEARS</Text>
-              <Text style={styles.statValue}>{selectedStats.totalDeletions}</Text>
-            </View>
-            <View style={styles.statPill}>
-              <Text style={styles.statLabel}>LVL</Text>
-              <Text style={styles.statValue}>{selectedStats.tier}</Text>
-            </View>
-            <View style={styles.statPill}>
-              <Text style={styles.statLabel}>NEXT</Text>
-              <Text style={styles.statValue}>
-                {selectedStats.maxTier ? 'MAX' : selectedStats.deletesToNext}
-              </Text>
-            </View>
+          <View style={styles.statPill}>
+            <Text style={styles.statLabel}>LVL</Text>
+            <Text style={styles.statValue}>{selectedStats.tier}</Text>
+          </View>
+          <View style={styles.statPill}>
+            <Text style={styles.statLabel}>NEXT</Text>
+            <Text style={styles.statValue}>
+              {selectedStats.maxTier ? 'MAX' : selectedStats.deletesToNext}
+            </Text>
           </View>
         </View>
 
@@ -292,9 +322,18 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     paddingHorizontal: 20,
-    paddingTop: 8,
+    paddingTop: 4,
     alignItems: 'center',
     gap: 14,
+  },
+  headerBlock: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    alignItems: 'center',
+    gap: 6,
+  },
+  scrollArea: {
+    flex: 1,
   },
   header: {
     fontFamily: arcadeFonts.pixel,
@@ -404,13 +443,16 @@ const styles = StyleSheet.create({
   previewPanel: {
     width: '100%',
     maxWidth: 340,
+    alignSelf: 'center',
     borderWidth: 3,
     borderColor: arcadeColors.borderPink,
     borderRadius: 8,
     backgroundColor: 'rgba(10, 20, 40, 0.88)',
     paddingHorizontal: 16,
     paddingTop: 14,
-    paddingBottom: 16,
+    paddingBottom: 12,
+    marginHorizontal: 20,
+    marginBottom: 10,
     alignItems: 'center',
     gap: 8,
     shadowColor: arcadeColors.neonPink,
@@ -421,6 +463,7 @@ const styles = StyleSheet.create({
   },
   previewFrame: {
     width: '72%',
+    aspectRatio: AVATAR_ASPECT_RATIO,
     borderWidth: 2,
     borderColor: arcadeColors.borderCyan,
     borderRadius: 8,

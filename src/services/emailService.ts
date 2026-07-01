@@ -31,7 +31,7 @@ export function getActiveCharacterId(): CharacterId {
   return activeCharacterId;
 }
 
-function relayHeaders(extra?: HeadersInit): HeadersInit {
+export function relayHeaders(extra?: HeadersInit): HeadersInit {
   return {
     'Content-Type': 'application/json',
     'X-Account-Key': activeAccountKey,

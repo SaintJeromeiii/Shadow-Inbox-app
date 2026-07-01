@@ -7,7 +7,8 @@ export type DrawerRoute =
   | 'intel_deck'
   | 'auto_pilot'
   | 'knowledge_core'
-  | 'admin_logs';
+  | 'admin_logs'
+  | 'settings';
 
 export interface DrawerMenuItem {
   route: DrawerRoute;
@@ -63,5 +64,10 @@ export const SECONDARY_DRAWER_ITEMS: DrawerMenuItem[] = [
     route: 'admin_logs',
     label: 'OPS CONSOLE',
     subtitle: 'Automation logs & replay',
+  },
+  {
+    route: 'settings',
+    label: 'SETTINGS',
+    subtitle: 'Profile, privacy, Gmail',
   },
 ];

@@ -9,8 +9,8 @@ import {
 import { exchangeGoogleAuthCode } from '../services/authService';
 import { checkRelayHealth, getRelayUrl } from '../services/emailService';
 import { unhideAccountOnDevice } from '../services/accountStorage';
-import { GOOGLE_OAUTH_SCOPES } from '../constants/googleOAuthScopes';
 import { normalizeGoogleClientId } from '../utils/googleOAuthRedirect';
+import { GOOGLE_OAUTH_SCOPES } from '../constants/googleOAuthScopes';
 import type { AccountProfile } from '../types/account';
 
 const PLACEHOLDER_CLIENT_IDS = new Set([
@@ -60,6 +60,31 @@ async function exchangeAuthCodeWithRetry(input: {
 
   await new Promise((resolve) => setTimeout(resolve, 1500));
   return exchangeGoogleAuthCode(input);
+}
+
+async function resetGoogleSessionForFreshAuthCode(): Promise<void> {
+  try {
+    await GoogleSignin.revokeAccess();
+  } catch {
+    // ignore — account may not be linked natively yet
+  }
+
+  try {
+    await GoogleSignin.signOut();
+  } catch {
+    // ignore
+  }
+}
+
+async function requestGoogleServerAuthCode(): Promise<string | null> {
+  await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+  const signInResult = await GoogleSignin.signIn();
+
+  if (!isSuccessResponse(signInResult)) {
+    return null;
+  }
+
+  return signInResult.data.serverAuthCode ?? null;
 }
 
 interface UseGoogleSignInOptions {
@@ -118,14 +143,12 @@ export function useGoogleSignIn(options: UseGoogleSignInOptions = {}) {
         return;
       }
 
-      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
-      const signInResult = await GoogleSignin.signIn();
-
-      if (!isSuccessResponse(signInResult)) {
-        return;
+      let serverAuthCode = await requestGoogleServerAuthCode();
+      if (!serverAuthCode) {
+        await resetGoogleSessionForFreshAuthCode();
+        serverAuthCode = await requestGoogleServerAuthCode();
       }
 
-      const serverAuthCode = signInResult.data.serverAuthCode;
       if (!serverAuthCode) {
         Alert.alert(
           'Google Sign-In Failed',
@@ -144,13 +167,15 @@ export function useGoogleSignIn(options: UseGoogleSignInOptions = {}) {
       });
 
       if (!result.success || !result.account) {
-        Alert.alert(
-          'Google Sign-In Failed',
-          result.error ?? 'Could not complete account linking on the relay.',
-        );
+        const relayError = result.error ?? 'Could not complete account linking on the relay.';
+        const hint = /invalid_grant|expired|revoked/i.test(relayError)
+          ? '\n\nTry again in a few seconds. If this keeps happening, confirm GOOGLE_CLIENT_SECRET on Railway matches your Web OAuth client.'
+          : '';
+        Alert.alert('Google Sign-In Failed', `${relayError}${hint}`);
         return;
       }
 
+      await unhideAccountOnDevice(result.account.key);
       await onSuccessRef.current?.(result.account);
     } catch (error) {
       if (isErrorWithCode(error)) {

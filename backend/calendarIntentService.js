@@ -5,6 +5,7 @@ const {
   formatSlotLabel,
   DEFAULT_TIMEZONE,
 } = require('./calendarService');
+const { tryConsumeAiQuota } = require('./aiUsageService');
 
 const API_KEY =
   process.env.OPENAI_API_KEY || process.env.EXPO_PUBLIC_OPENAI_API_KEY || '';
@@ -75,13 +76,17 @@ function fallbackParseSchedulingWindow(notification) {
   };
 }
 
-async function parseSchedulingWindow(notification) {
+async function parseSchedulingWindow(notification, accountKey = null) {
   const text = `${extractSubject(notification.rawText)}\n\n${notification.rawText}`;
   if (!hasSchedulingKeywords(text)) {
     return null;
   }
 
   if (!API_KEY || API_KEY.includes('your_')) {
+    return fallbackParseSchedulingWindow(notification);
+  }
+
+  if (accountKey && !(await tryConsumeAiQuota(accountKey, 'llm', 1))) {
     return fallbackParseSchedulingWindow(notification);
   }
 
@@ -204,7 +209,7 @@ function applyCalendarGuard(notification, guard) {
 }
 
 async function auditCalendarForEmail(accountKey, notification) {
-  const parsed = await parseSchedulingWindow(notification);
+  const parsed = await parseSchedulingWindow(notification, accountKey);
   if (!parsed?.hasSchedulingIntent) {
     return { guard: null, promptBlock: '' };
   }

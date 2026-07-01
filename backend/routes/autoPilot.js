@@ -4,6 +4,7 @@ const {
   listRules,
   setRuleEnabled,
   getRuleById,
+  createRule,
 } = require('../autoRulesService');
 const { listHistory } = require('../autoPilotHistory');
 
@@ -28,6 +29,36 @@ router.get('/rules', async (_req, res) => {
   } catch (error) {
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Failed to load auto-pilot rules.',
+    });
+  }
+});
+
+router.post('/rules', async (req, res) => {
+  const { name, platform, condition, action, replyText, enabled } = req.body ?? {};
+
+  if (!name || !condition) {
+    res.status(400).json({ error: 'Missing required fields: name, condition.' });
+    return;
+  }
+
+  try {
+    const rule = await createRule({
+      name,
+      platform,
+      condition,
+      action,
+      replyText,
+      enabled,
+    });
+    const allRules = await listRules({ includeDisabled: true });
+    res.json({
+      success: true,
+      rule,
+      activeCount: allRules.filter((item) => item.enabled !== false).length,
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Failed to create rule.',
     });
   }
 });

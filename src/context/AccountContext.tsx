@@ -13,24 +13,30 @@ import {
   findAccountProfile,
 } from '../constants/accounts';
 import { fetchRelayAccounts } from '../services/authService';
-import { getHiddenAccountKeys } from '../services/accountStorage';
+import {
+  cacheLinkedAccounts,
+  getHiddenAccountKeys,
+  mergeAccountsWithCache,
+  readCachedLinkedAccounts,
+} from '../services/accountStorage';
 import { setActiveAccountKey } from '../services/emailService';
+import {
+  accountKeyForEmail,
+  dedupeAccountsByEmail,
+  preferOAuthAccountKey,
+} from '../utils/accountProfiles';
 import type { AccountKey, AccountProfile } from '../types/account';
 
 const STORAGE_KEY = '@shadow_inbox/active_account';
 const DEV_FALLBACK_EMAIL = 'jleonandersonjr@gmail.com';
 
-function accountKeyForEmail(
+function filterVisibleAccounts(
   accounts: AccountProfile[],
-  email: string,
-): AccountKey | null {
-  const normalized = email.trim().toLowerCase();
-  if (!normalized) return null;
-
-  const match = accounts.find(
-    (account) => account.email.trim().toLowerCase() === normalized,
+  hidden: Set<string>,
+): AccountProfile[] {
+  return dedupeAccountsByEmail(
+    accounts.filter((account) => !hidden.has(account.key) && !account.mockOnly),
   );
-  return match?.key ?? null;
 }
 
 interface AccountContextValue {
@@ -45,61 +51,72 @@ interface AccountContextValue {
 const AccountContext = createContext<AccountContextValue | null>(null);
 
 export function AccountProvider({ children }: { children: ReactNode }) {
-  const [email, setEmail] = useState(__DEV__ ? DEV_FALLBACK_EMAIL : '');
   const [activeAccount, setActiveAccountState] = useState<AccountKey>('personal');
   const [accounts, setAccounts] = useState<AccountProfile[]>(BUILTIN_ACCOUNT_PROFILES);
   const [ready, setReady] = useState(false);
 
   const refreshAccounts = useCallback(async () => {
-    try {
-      const [remoteAccounts, hidden] = await Promise.all([
-        fetchRelayAccounts(),
-        getHiddenAccountKeys(),
-      ]);
+    const [hidden, cachedOAuth] = await Promise.all([
+      getHiddenAccountKeys(),
+      readCachedLinkedAccounts(),
+    ]);
 
-      if (remoteAccounts.length > 0) {
-        const visible = remoteAccounts.filter((account) => !hidden.has(account.key));
+    try {
+      const remoteAccounts = await fetchRelayAccounts();
+      const merged = mergeAccountsWithCache(remoteAccounts, cachedOAuth);
+      const visible = filterVisibleAccounts(merged, hidden);
+
+      if (visible.length > 0) {
         setAccounts(visible);
+        await cacheLinkedAccounts(visible);
         return visible;
       }
     } catch (error) {
       console.warn('[Shadow Inbox] Could not load accounts from relay:', error);
     }
 
-    const hidden = await getHiddenAccountKeys();
-    const visibleBuiltin = BUILTIN_ACCOUNT_PROFILES.filter(
-      (account) => !hidden.has(account.key),
+    const fallback = filterVisibleAccounts(
+      mergeAccountsWithCache(BUILTIN_ACCOUNT_PROFILES, cachedOAuth),
+      hidden,
     );
-    setAccounts(visibleBuiltin);
-    return visibleBuiltin;
+    setAccounts(fallback);
+    return fallback;
   }, []);
 
   useEffect(() => {
     let cancelled = false;
 
     async function hydrateAccount() {
-      const [saved, remoteAccounts] = await Promise.all([
-        AsyncStorage.getItem(STORAGE_KEY),
-        refreshAccounts().catch(() => BUILTIN_ACCOUNT_PROFILES),
-      ]);
+      const saved = await AsyncStorage.getItem(STORAGE_KEY);
+      let visible: AccountProfile[];
+
+      try {
+        visible = await refreshAccounts();
+      } catch {
+        const hidden = await getHiddenAccountKeys();
+        visible = filterVisibleAccounts(BUILTIN_ACCOUNT_PROFILES, hidden);
+      }
 
       if (cancelled) return;
 
-      const available = remoteAccounts.length > 0 ? remoteAccounts : BUILTIN_ACCOUNT_PROFILES;
-      const hidden = await getHiddenAccountKeys();
-      const visible = available.filter((account) => !hidden.has(account.key));
       const devFallbackAccountKey = __DEV__
-        ? accountKeyForEmail(visible, email)
+        ? accountKeyForEmail(visible, DEV_FALLBACK_EMAIL)
         : null;
-      const initialAccount =
-        saved &&
-        visible.some((account) => account.key === saved)
-          ? saved
-          : devFallbackAccountKey ?? visible[0]?.key ?? 'personal';
 
-      if (__DEV__ && email && !devFallbackAccountKey) {
+      const savedAccountKey =
+        saved && visible.some((account) => account.key === saved)
+          ? preferOAuthAccountKey(visible, saved)
+          : null;
+
+      const initialAccount =
+        savedAccountKey ??
+        devFallbackAccountKey ??
+        visible[0]?.key ??
+        'personal';
+
+      if (__DEV__ && !accountKeyForEmail(visible, DEV_FALLBACK_EMAIL)) {
         console.warn(
-          `[Shadow Inbox] Dev fallback email not linked yet: ${email}`,
+          `[Shadow Inbox] Dev fallback email not linked yet: ${DEV_FALLBACK_EMAIL}`,
         );
       }
 
@@ -113,17 +130,17 @@ export function AccountProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [email, refreshAccounts]);
+  }, [refreshAccounts]);
 
-  const setActiveAccount = useCallback(async (accountKey: AccountKey) => {
-    setActiveAccountState(accountKey);
-    setActiveAccountKey(accountKey);
-    const profile = findAccountProfile(accountKey, accounts);
-    if (__DEV__ && profile.email) {
-      setEmail(profile.email);
-    }
-    await AsyncStorage.setItem(STORAGE_KEY, accountKey);
-  }, [accounts]);
+  const setActiveAccount = useCallback(
+    async (accountKey: AccountKey) => {
+      const resolvedKey = preferOAuthAccountKey(accounts, accountKey);
+      setActiveAccountState(resolvedKey);
+      setActiveAccountKey(resolvedKey);
+      await AsyncStorage.setItem(STORAGE_KEY, resolvedKey);
+    },
+    [accounts],
+  );
 
   const value = useMemo<AccountContextValue>(
     () => ({

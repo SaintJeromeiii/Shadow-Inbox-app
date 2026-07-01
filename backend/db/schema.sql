@@ -196,3 +196,73 @@ alter table public.executive_briefs disable row level security;
 alter table public.firewall_rules disable row level security;
 alter table public.user_progress disable row level security;
 alter table public.automation_logs disable row level security;
+
+create table if not exists public.oauth_accounts (
+  account_key text primary key,
+  email text not null,
+  payload jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_oauth_accounts_email
+  on public.oauth_accounts (email);
+
+alter table public.oauth_accounts disable row level security;
+
+create table if not exists public.user_profiles (
+  account_key text primary key,
+  display_name text not null default 'Operator',
+  email text not null default '',
+  role_title text not null default '',
+  tone_notes text not null default '',
+  sign_off text not null default '',
+  knowledge_text text not null default '',
+  onboarding_completed boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_user_profiles_email
+  on public.user_profiles (email);
+
+alter table public.user_profiles disable row level security;
+
+create table if not exists public.triage_daily_usage (
+  account_key text not null,
+  usage_date date not null default current_date,
+  triage_count integer not null default 0,
+  updated_at timestamptz not null default now(),
+  primary key (account_key, usage_date)
+);
+
+create index if not exists idx_triage_daily_usage_date
+  on public.triage_daily_usage (usage_date desc);
+
+alter table public.triage_daily_usage disable row level security;
+
+create table if not exists public.ai_daily_usage (
+  account_key text not null,
+  usage_date date not null default current_date,
+  triage_count integer not null default 0,
+  llm_count integer not null default 0,
+  embedding_count integer not null default 0,
+  updated_at timestamptz not null default now(),
+  primary key (account_key, usage_date)
+);
+
+create index if not exists idx_ai_daily_usage_date
+  on public.ai_daily_usage (usage_date desc);
+
+alter table public.ai_daily_usage disable row level security;
+
+alter table public.user_profiles
+  add column if not exists daily_goal integer not null default 10;
+
+alter table public.user_profiles
+  add column if not exists clears_today integer not null default 0;
+
+alter table public.user_profiles
+  add column if not exists streak_days integer not null default 0;
+
+alter table public.user_profiles
+  add column if not exists last_clear_date date;

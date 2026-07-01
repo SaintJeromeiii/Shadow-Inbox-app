@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Image,
+  InteractionManager,
   Platform,
   StyleSheet,
   View,
@@ -31,6 +32,10 @@ export interface DynamicAvatarProps {
   /** Inbox signal count — drives visual tier when visualTier is omitted. */
   inboxCount?: number;
   enableIntro?: boolean;
+  /** Looped motion ambience — off when the parent screen owns audio. */
+  enableIntroAudio?: boolean;
+  /** Keep intro video playing (fighter select preview). */
+  holdIntro?: boolean;
   replayToken?: number;
 }
 
@@ -38,6 +43,8 @@ interface AvatarIntroVideoProps {
   source: number;
   characterId: CharacterId;
   sessionId: string;
+  enableIntroAudio: boolean;
+  loopIntro: boolean;
   onEnd: () => void;
 }
 
@@ -45,57 +52,100 @@ function AvatarIntroVideo({
   source,
   characterId,
   sessionId,
+  enableIntroAudio,
+  loopIntro,
   onEnd,
 }: AvatarIntroVideoProps) {
-  const introSoundActiveRef = useRef(false);
+  const onEndRef = useRef(onEnd);
+  onEndRef.current = onEnd;
+  const audioStartedRef = useRef(false);
+  const playbackStartedRef = useRef(false);
 
   const player = useVideoPlayer(source, (instance) => {
-    instance.loop = false;
+    instance.loop = loopIntro;
     instance.muted = true;
     instance.audioMixingMode = 'mixWithOthers';
   });
 
-  const stopIntroSound = useCallback(() => {
-    introSoundActiveRef.current = false;
-    stopCharacterIntroAmbience(sessionId);
-  }, [sessionId]);
-
   useEffect(() => {
     let active = true;
-    introSoundActiveRef.current = false;
+    audioStartedRef.current = false;
+    playbackStartedRef.current = false;
 
-    const playingSubscription = player.addListener('playingChange', ({ isPlaying }) => {
-      if (!active || !isPlaying || introSoundActiveRef.current) {
+    const startAudio = () => {
+      if (!active || !enableIntroAudio || audioStartedRef.current) {
         return;
       }
-
-      introSoundActiveRef.current = true;
+      audioStartedRef.current = true;
       void startCharacterIntroAmbience(characterId, sessionId);
+    };
+
+    const beginPlayback = () => {
+      if (!active || playbackStartedRef.current) {
+        return;
+      }
+      playbackStartedRef.current = true;
+      try {
+        player.currentTime = 0;
+        player.play();
+      } catch {
+        playbackStartedRef.current = false;
+      }
+      startAudio();
+    };
+
+    const statusSubscription = player.addListener('statusChange', ({ status }) => {
+      if (status === 'readyToPlay') {
+        beginPlayback();
+      }
+    });
+
+    const playingSubscription = player.addListener('playingChange', ({ isPlaying }) => {
+      if (isPlaying) {
+        startAudio();
+      }
     });
 
     const endSubscription = player.addListener('playToEnd', () => {
-      if (!active) {
+      if (!active || loopIntro) {
         return;
       }
 
-      stopIntroSound();
-      onEnd();
+      stopCharacterIntroAmbience(sessionId);
+      onEndRef.current();
     });
 
-    try {
-      player.currentTime = 0;
-      player.play();
-    } catch {
-      // useVideoPlayer may already have released the native player during unmount.
-    }
+    const kickoff = InteractionManager.runAfterInteractions(() => {
+      requestAnimationFrame(() => {
+        if (!active) {
+          return;
+        }
+
+        if (player.status === 'readyToPlay') {
+          beginPlayback();
+          return;
+        }
+
+        // Nudge load after screen transitions (e.g. Press Start → fighter select).
+        try {
+          player.currentTime = 0;
+        } catch {
+          // Player may not be ready yet — statusChange will start playback.
+        }
+      });
+    });
 
     return () => {
       active = false;
+      kickoff.cancel();
+      statusSubscription.remove();
       playingSubscription.remove();
       endSubscription.remove();
-      stopIntroSound();
+      stopCharacterIntroAmbience(sessionId);
     };
-  }, [player, characterId, sessionId, onEnd, stopIntroSound]);
+    // Player lifetime matches this keyed mount — avoid re-running on player identity churn.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, characterId, enableIntroAudio, loopIntro]);
 
   return (
     <VideoView
@@ -104,6 +154,7 @@ function AvatarIntroVideo({
       contentFit="contain"
       nativeControls={false}
       fullscreenOptions={{ enable: false }}
+      surfaceType={Platform.OS === 'android' ? 'textureView' : undefined}
       accessibilityLabel="Character intro video"
     />
   );
@@ -114,6 +165,8 @@ export default function DynamicAvatar({
   visualTier: visualTierProp,
   inboxCount = 0,
   enableIntro = true,
+  enableIntroAudio = false,
+  holdIntro = false,
   replayToken = 0,
 }: DynamicAvatarProps) {
   const { characterId: activeCharacterId } = useCharacter();
@@ -141,28 +194,30 @@ export default function DynamicAvatar({
   }, [canPlayIntro, introSessionKey]);
 
   const handleIntroEnd = useCallback(() => {
-    setIsVideoPlaying(false);
-  }, []);
+    if (!holdIntro) {
+      setIsVideoPlaying(false);
+    }
+  }, [holdIntro]);
 
   return (
-    <View style={styles.frame}>
-      <View style={styles.mediaShell}>
-        <Image
-          source={tierAssets.still}
-          style={[styles.media, pixelatedImageStyle]}
-          resizeMode="contain"
-          accessibilityLabel={`${registryEntry.codename} tier ${visualTier} avatar`}
+    <View style={styles.frame} collapsable={false}>
+      <Image
+        source={tierAssets.still}
+        style={[styles.media, pixelatedImageStyle]}
+        resizeMode="contain"
+        accessibilityLabel={`${registryEntry.codename} tier ${visualTier} avatar`}
+      />
+      {canPlayIntro && isVideoPlaying && tierAssets.intro != null ? (
+        <AvatarIntroVideo
+          key={introSessionKey}
+          source={tierAssets.intro}
+          characterId={characterId}
+          sessionId={`avatar-intro-${introSessionKey}`}
+          enableIntroAudio={enableIntroAudio}
+          loopIntro={holdIntro}
+          onEnd={handleIntroEnd}
         />
-        {canPlayIntro && isVideoPlaying && tierAssets.intro != null ? (
-          <AvatarIntroVideo
-            key={introSessionKey}
-            source={tierAssets.intro}
-            characterId={characterId}
-            sessionId={`avatar-intro-${introSessionKey}`}
-            onEnd={handleIntroEnd}
-          />
-        ) : null}
-      </View>
+      ) : null}
     </View>
   );
 }
@@ -178,19 +233,15 @@ const styles = StyleSheet.create({
     aspectRatio: AVATAR_ASPECT_RATIO,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  mediaShell: {
-    ...StyleSheet.absoluteFillObject,
     overflow: 'hidden',
     backgroundColor: arcadeColors.bgDeep,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   media: {
+    ...StyleSheet.absoluteFillObject,
     width: '100%',
     height: '100%',
   },
   mediaOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    zIndex: 2,
   },
 });

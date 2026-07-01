@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { tryConsumeAiQuota } = require('./aiUsageService');
 
 const MEMORY_PATH = path.join(__dirname, 'vector_memory.json');
 const MAX_MEMORY_ENTRIES = 2000;
@@ -130,18 +131,25 @@ async function embedWithOpenAi(text) {
   return normalizeVector(vector);
 }
 
-async function generateEmbedding(text) {
+async function generateEmbedding(text, options = {}) {
   const input = String(text || '').trim();
+  const accountKey = options.accountKey;
+
   if (!input) {
     throw new Error('Cannot embed empty text.');
   }
 
   if (shouldPreferOpenAiEmbeddings()) {
-    try {
-      const vector = await embedWithOpenAi(input);
-      return { vector, model: OPENAI_EMBEDDING_MODEL, provider: 'openai' };
-    } catch (error) {
-      console.warn('[Memory] OpenAI embedding failed, falling back to local model:', error);
+    const allowed =
+      !accountKey || (await tryConsumeAiQuota(accountKey, 'embedding', 1));
+
+    if (allowed) {
+      try {
+        const vector = await embedWithOpenAi(input);
+        return { vector, model: OPENAI_EMBEDDING_MODEL, provider: 'openai' };
+      } catch (error) {
+        console.warn('[Memory] OpenAI embedding failed, falling back to local model:', error);
+      }
     }
   }
 
@@ -220,7 +228,7 @@ async function retrieveRelevantMemories(accountKey, notification, options = {}) 
   }
 
   const queryDocument = buildMemoryDocument(notification);
-  const { vector: queryVector } = await generateEmbedding(queryDocument);
+  const { vector: queryVector } = await generateEmbedding(queryDocument, { accountKey });
 
   const ranked = accountEntries
     .map((entry) => ({
@@ -257,7 +265,7 @@ async function saveMemoryEntry(accountKey, notification, triage) {
   if (!notification?.id || !triage) return null;
 
   const document = buildMemoryDocument(notification, triage);
-  const { vector, model, provider } = await generateEmbedding(document);
+  const { vector, model, provider } = await generateEmbedding(document, { accountKey });
   const store = readMemoryStore();
 
   const entry = {
