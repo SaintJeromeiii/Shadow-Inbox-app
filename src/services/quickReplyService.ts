@@ -1,4 +1,5 @@
 import type { AccountKey } from '../types/account';
+import { throwIfAiQuotaExceeded } from '../utils/relayErrors';
 import type { QuickReplyGenerateResult } from '../types/quickReply';
 import { getActiveAccountKey, relayFetch } from './emailService';
 
@@ -53,6 +54,7 @@ export async function generateQuickReplies(
     );
 
     if (!response.ok) {
+      throwIfAiQuotaExceeded(response, data);
       throw new Error(data.error ?? `Quick reply generation failed (${response.status})`);
     }
 

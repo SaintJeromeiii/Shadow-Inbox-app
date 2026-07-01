@@ -1,6 +1,7 @@
 const { listAccounts, listAccountKeys } = require('./accounts');
 const { readNotifications } = require('./notificationFeed');
 const { appendExecutiveBrief } = require('./executiveBriefsLedger');
+const { API_KEY, API_URL, MODEL } = require('./openaiConfig');
 
 const REQUEST_TIMEOUT_MS = 45_000;
 const BRIEFING_WINDOW_HOURS = 24;
@@ -41,18 +42,9 @@ const QUIET_BRIEFING_MARKDOWN = `### CRIME BULLETIN
 
 function getOpenAiConfig() {
   return {
-    apiKey:
-      process.env.OPENAI_API_KEY ||
-      process.env.EXPO_PUBLIC_OPENAI_API_KEY ||
-      '',
-    apiUrl:
-      process.env.LLM_API_URL ||
-      process.env.EXPO_PUBLIC_LLM_API_URL ||
-      'https://api.openai.com/v1/chat/completions',
-    model:
-      process.env.LLM_MODEL ||
-      process.env.EXPO_PUBLIC_LLM_MODEL ||
-      'gpt-4o-mini',
+    apiKey: API_KEY,
+    apiUrl: API_URL,
+    model: MODEL,
   };
 }
 

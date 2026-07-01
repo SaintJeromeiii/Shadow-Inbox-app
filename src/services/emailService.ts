@@ -5,6 +5,7 @@ import type { ReplyTone } from '../types/replyTone';
 import type { PlayerStats } from '../types/userProgress';
 import type { CharacterId } from '../types/character';
 import { DEFAULT_CHARACTER_ID } from '../constants/characters';
+import { throwIfAiQuotaExceeded } from '../utils/relayErrors';
 
 const RELAY_URL =
   process.env.EXPO_PUBLIC_EMAIL_RELAY_URL ??
@@ -362,8 +363,12 @@ export async function redraftEmailReply(
       let errorMessage = `Relay returned ${response.status}`;
       try {
         const errorBody = (await response.json()) as { error?: string };
+        throwIfAiQuotaExceeded(response, errorBody);
         if (errorBody.error) errorMessage = errorBody.error;
-      } catch {
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AiQuotaExceededError') {
+          return { success: false, error: error.message };
+        }
         const text = await response.text();
         if (text) errorMessage = text;
       }

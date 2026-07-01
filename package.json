@@ -10,6 +10,7 @@
     "@expo/vector-icons": "15.0.3",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-google-signin/google-signin": "^16.1.2",
+    "@sentry/react-native": "^8.16.0",
     "@supabase/supabase-js": "^2.108.2",
     "@xenova/transformers": "^2.17.2",
     "cors": "^2.8.6",
@@ -65,10 +66,15 @@
     "sync:knowledge-base": "node scripts/syncKnowledgeBase.js",
     "generate:retro-sounds": "node scripts/generateRetroSounds.js",
     "google:oauth-config": "node scripts/printGoogleOAuthConfig.js",
+    "smoke:production": "bash scripts/smoke-test-production.sh",
     "prestart": "node scripts/syncKnowledgeBase.js",
     "dev:backend": "concurrently --names relay,daemon --prefix-colors blue,magenta \"npm run email-relay\" \"npm run fetch-daemon\"",
     "build:ios": "eas build --profile development --platform ios",
-    "build:android": "eas build --profile development --platform android"
+    "build:android": "eas build --profile development --platform android",
+    "build:preview:android": "eas build --profile preview --platform android",
+    "build:preview:ios": "eas build --profile preview --platform ios",
+    "build:production:android": "eas build --profile production --platform android",
+    "build:production:ios": "eas build --profile production --platform ios",
   },
   "private": true
 }

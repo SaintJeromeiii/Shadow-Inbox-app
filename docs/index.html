@@ -13,6 +13,8 @@
       --pink: #ff4fd8;
       --text: #d9e2f2;
       --muted: #8b93a8;
+      --ok: #5ef0a0;
+      --err: #ff6b6b;
     }
     * { box-sizing: border-box; }
     body {
@@ -51,16 +53,45 @@
     .card h2 { margin: 0 0 8px; font-size: 1rem; color: var(--cyan); }
     .card p { margin: 0; color: var(--muted); }
     a { color: var(--cyan); }
-    .cta {
-      display: inline-block;
-      margin-top: 28px;
+    .waitlist {
+      margin-top: 36px;
+      padding: 22px;
+      border-radius: 14px;
+      border: 1px solid #2a3b5c;
+      background: rgba(16, 24, 42, 0.95);
+    }
+    .waitlist h2 { margin: 0 0 8px; color: var(--pink); font-size: 1.1rem; }
+    .waitlist p { margin: 0 0 16px; color: var(--muted); }
+    .waitlist-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .waitlist input {
+      flex: 1 1 220px;
+      min-width: 0;
+      padding: 12px 14px;
+      border-radius: 10px;
+      border: 1px solid #2a3b5c;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 16px;
+    }
+    .waitlist button {
       padding: 12px 18px;
+      border: none;
       border-radius: 10px;
       background: var(--pink);
       color: #061018;
-      text-decoration: none;
       font-weight: 700;
+      cursor: pointer;
+      font-size: 15px;
     }
+    .waitlist button:disabled { opacity: 0.6; cursor: wait; }
+    .waitlist-msg { margin-top: 12px; font-size: 14px; min-height: 1.4em; }
+    .waitlist-msg.ok { color: var(--ok); }
+    .waitlist-msg.err { color: var(--err); }
+    .links { margin-top: 20px; display: flex; gap: 16px; flex-wrap: wrap; }
     footer { margin-top: 48px; color: var(--muted); font-size: 14px; }
   </style>
 </head>
@@ -88,11 +119,65 @@
       </section>
     </div>
 
-    <a class="cta" href="privacy.html">Privacy Policy</a>
+    <section class="waitlist" id="waitlist">
+      <h2>Request beta access</h2>
+      <p>Android beta opening soon. Join the waitlist — we’ll email you when a slot opens.</p>
+      <form class="waitlist-row" id="waitlist-form">
+        <input type="email" name="email" placeholder="you@company.com" required autocomplete="email" />
+        <button type="submit" id="waitlist-btn">Join waitlist</button>
+      </form>
+      <p class="waitlist-msg" id="waitlist-msg" aria-live="polite"></p>
+    </section>
+
+    <div class="links">
+      <a href="privacy.html">Privacy Policy</a>
+    </div>
 
     <footer>
       <p>Shadow Inbox · Android beta · <a href="privacy.html">Privacy</a></p>
     </footer>
   </main>
+  <script>
+    (function () {
+      var form = document.getElementById('waitlist-form');
+      var msg = document.getElementById('waitlist-msg');
+      var btn = document.getElementById('waitlist-btn');
+      if (!form) return;
+
+      form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        var email = (form.email && form.email.value || '').trim().toLowerCase();
+        if (!email) return;
+
+        btn.disabled = true;
+        msg.textContent = 'Submitting…';
+        msg.className = 'waitlist-msg';
+
+        fetch('/api/waitlist/signup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: email }),
+        })
+          .then(function (res) {
+            return res.json().then(function (body) {
+              if (!res.ok) throw new Error(body.error || 'Could not join waitlist.');
+              return body;
+            });
+          })
+          .then(function () {
+            msg.textContent = "You're on the list. We'll reach out when beta opens.";
+            msg.className = 'waitlist-msg ok';
+            form.reset();
+          })
+          .catch(function (err) {
+            msg.textContent = err.message || 'Something went wrong. Try again.';
+            msg.className = 'waitlist-msg err';
+          })
+          .finally(function () {
+            btn.disabled = false;
+          });
+      });
+    })();
+  </script>
 </body>
 </html>

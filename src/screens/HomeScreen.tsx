@@ -67,6 +67,7 @@ import {
 import { getStageDifficulty, isBossLevel } from '../utils/stageDifficulty';
 import { useCharacter } from '../context/CharacterContext';
 import { fetchDailyEngagement, recordDailyClearance, type DailyEngagement } from '../services/dailyEngagementService';
+import { stopAllCharacterIntroAmbience } from '../services/retroSoundService';
 
 interface HomeScreenProps {
   onOpenDrawer: () => void;

@@ -255,6 +255,16 @@ create index if not exists idx_ai_daily_usage_date
 
 alter table public.ai_daily_usage disable row level security;
 
+create table if not exists public.waitlist_signups (
+  email text primary key,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_waitlist_signups_created
+  on public.waitlist_signups (created_at desc);
+
+alter table public.waitlist_signups disable row level security;
+
 alter table public.user_profiles
   add column if not exists daily_goal integer not null default 10;
 

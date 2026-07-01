@@ -30,6 +30,8 @@ module.exports = {
     name: 'Shadow-Inbox',
     slug: 'Shadow-Inbox',
     version: '1.0.0',
+    description:
+      'AI-powered Gmail triage, smart drafts, and arcade-style inbox clearing. Server-side AI keeps your keys off your phone.',
     orientation: 'portrait',
     icon: './assets/icon.png',
     scheme: 'shadow-inbox',

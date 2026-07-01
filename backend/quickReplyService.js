@@ -1,14 +1,7 @@
 const { loadKnowledgeBase } = require('./knowledgeBase');
 const { retrieveRelevantMemoriesForText } = require('./memoryEngine');
 
-const API_KEY =
-  process.env.OPENAI_API_KEY || process.env.EXPO_PUBLIC_OPENAI_API_KEY || '';
-const API_URL =
-  process.env.LLM_API_URL ||
-  process.env.EXPO_PUBLIC_LLM_API_URL ||
-  'https://api.openai.com/v1/chat/completions';
-const MODEL =
-  process.env.LLM_MODEL || process.env.EXPO_PUBLIC_LLM_MODEL || 'gpt-4o-mini';
+const { API_KEY, API_URL, MODEL } = require('./openaiConfig');
 const REQUEST_TIMEOUT_MS = 45_000;
 
 const QUICK_REPLY_SYSTEM_PROMPT = `You are Jerome's executive reply assistant for Shadow Inbox.

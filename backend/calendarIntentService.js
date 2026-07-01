@@ -7,14 +7,7 @@ const {
 } = require('./calendarService');
 const { tryConsumeAiQuota } = require('./aiUsageService');
 
-const API_KEY =
-  process.env.OPENAI_API_KEY || process.env.EXPO_PUBLIC_OPENAI_API_KEY || '';
-const API_URL =
-  process.env.LLM_API_URL ||
-  process.env.EXPO_PUBLIC_LLM_API_URL ||
-  'https://api.openai.com/v1/chat/completions';
-const MODEL =
-  process.env.LLM_MODEL || process.env.EXPO_PUBLIC_LLM_MODEL || 'gpt-4o-mini';
+const { API_KEY, API_URL, MODEL } = require('./openaiConfig');
 const REQUEST_TIMEOUT_MS = 20_000;
 
 const SCHEDULING_PATTERN =

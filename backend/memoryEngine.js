@@ -12,8 +12,7 @@ const OPENAI_EMBEDDING_MODEL =
   process.env.MEMORY_EMBEDDING_MODEL || 'text-embedding-3-small';
 const OPENAI_EMBEDDING_URL =
   process.env.OPENAI_EMBEDDING_URL || 'https://api.openai.com/v1/embeddings';
-const API_KEY =
-  process.env.OPENAI_API_KEY || process.env.EXPO_PUBLIC_OPENAI_API_KEY || '';
+const { API_KEY } = require('./openaiConfig');
 
 let embedderPipeline = null;
 let embedderInitPromise = null;

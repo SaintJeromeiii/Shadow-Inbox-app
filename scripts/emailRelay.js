@@ -49,6 +49,7 @@ const firewallRouter = require('../backend/routes/firewall');
 const repliesRouter = require('../backend/routes/replies');
 const userRouter = require('../backend/routes/user');
 const triageRouter = require('../backend/routes/triage');
+const waitlistRouter = require('../backend/routes/waitlist');
 const adminRouter = require('../backend/routes/admin');
 const { recordDeletions, getPlayerStats } = require('../backend/userProgressService');
 const { getCharacterIdFromRequest } = require('../backend/characterIds');
@@ -182,6 +183,7 @@ function mountApiRouters(expressApp) {
   expressApp.use('/api/replies', repliesRouter);
   expressApp.use('/api/user', userRouter);
   expressApp.use('/api/triage', triageRouter);
+  expressApp.use('/api/waitlist', waitlistRouter);
   expressApp.use('/api/admin', requireAdminAuth, adminRouter);
 }
 

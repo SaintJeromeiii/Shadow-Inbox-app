@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { throwIfAiQuotaExceeded } from '../utils/relayErrors';
 import type { AccountKey } from '../types/account';
 import type { DailyBriefing } from '../types/briefing';
 import type { TriagedNotification } from '../types/notification';
@@ -57,8 +58,10 @@ export async function fetchLatestBriefing(
     let errorMessage = `Latest briefing request failed (${response.status})`;
     try {
       const body = (await response.json()) as { error?: string };
+      throwIfAiQuotaExceeded(response, body);
       if (body.error) errorMessage = body.error;
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AiQuotaExceededError') throw error;
       const text = await response.text();
       if (text) errorMessage = text;
     }
@@ -89,8 +92,10 @@ export async function generateDailyBriefing(
     let errorMessage = `Briefing request failed (${response.status})`;
     try {
       const body = (await response.json()) as { error?: string };
+      throwIfAiQuotaExceeded(response, body);
       if (body.error) errorMessage = body.error;
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AiQuotaExceededError') throw error;
       const text = await response.text();
       if (text) errorMessage = text;
     }

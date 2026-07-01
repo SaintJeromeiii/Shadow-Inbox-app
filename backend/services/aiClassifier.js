@@ -1,6 +1,6 @@
 const { OpenAI } = require('openai');
 
-const MODEL = process.env.LLM_MODEL || process.env.EXPO_PUBLIC_LLM_MODEL || 'gpt-4o-mini';
+const { MODEL } = require('../openaiConfig');
 
 let openaiClient = null;
 
