@@ -144,7 +144,7 @@ export default function AppShell() {
 
       <ScreenSlot active={route === 'admin_logs'}>
         <AdminLogsScreen
-          visible
+          visible={route === 'admin_logs'}
           variant="screen"
           onClose={goToPlayStage}
           onOpenDrawer={openDrawer}

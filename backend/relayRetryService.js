@@ -1,5 +1,6 @@
 const { sendBroadcastReply, findNotificationById } = require('./broadcastReply');
 const { ingestPlatformMessages } = require('./chatIngestService');
+const { sendPushNotification } = require('./services/pushNotificationService');
 const {
   MAX_RELAY_RETRIES,
   getLogById,
@@ -14,6 +15,37 @@ const {
 } = require('./automationLogsService');
 
 const RETRYABLE_STATUSES = new Set(['failed', 'dead_letter']);
+
+async function notifyRelayDeadLetter({
+  logId,
+  sender,
+  accountKey,
+  errorMessage,
+}) {
+  try {
+    await sendPushNotification(
+      '⚠️ Relay Failed (Dead Letter)',
+      `Email from ${sender} failed to pass rules engine. Tap to retry.`,
+      {
+        logId,
+        screen: 'admin_logs',
+        accountKey,
+        ...(errorMessage ? { errorMessage } : {}),
+      },
+    );
+  } catch (pushError) {
+    console.error('[RelayRetry] Dead letter push notification failed:', pushError);
+  }
+}
+
+function resolveSenderLabel(notification, log) {
+  return (
+    notification?.sender ||
+    log?.payload?.sender ||
+    log?.payload?.notificationId ||
+    'Unknown sender'
+  );
+}
 
 /**
  * Outbound relay with durable logging and bounded retries.
@@ -91,6 +123,13 @@ async function sendBroadcastReplyWithRetry(accountKey, notification, replyText, 
       );
 
       if (exhausted) {
+        const deadLetterLog = await getLogByMessageId(messageId);
+        await notifyRelayDeadLetter({
+          logId: deadLetterLog?.id ?? messageId,
+          sender: resolveSenderLabel(notification, deadLetterLog),
+          accountKey,
+          errorMessage: message,
+        });
         throw error;
       }
 
@@ -200,6 +239,15 @@ async function replayAutomationLog(logId, options = {}) {
       errorMessage: message,
       accountKey,
     });
+
+    if (exhausted) {
+      await notifyRelayDeadLetter({
+        logId: log.id,
+        sender: resolveSenderLabel(null, existing),
+        accountKey,
+        errorMessage: message,
+      });
+    }
 
     const wrapped = new Error(message);
     wrapped.statusCode = 500;

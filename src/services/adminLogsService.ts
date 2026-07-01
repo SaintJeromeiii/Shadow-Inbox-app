@@ -1,4 +1,5 @@
-import { getActiveAccountKey, relayFetch } from './emailService';
+import { Alert } from 'react-native';
+import { getActiveAccountKey, getRelayUrl } from './emailService';
 import type { AccountKey } from '../types/account';
 import type {
   AutomationLog,
@@ -6,25 +7,28 @@ import type {
   AutomationLogStatusFilter,
 } from '../types/automationLog';
 
-function adminRequestHeaders(
+const ADMIN_BASE_URL = `${getRelayUrl()}/api/admin`;
+const ADMIN_TOKEN = process.env.EXPO_PUBLIC_ADMIN_TOKEN ?? '';
+
+function buildAdminHeaders(
   accountKey: AccountKey,
   extra: Record<string, string> = {},
 ): Record<string, string> {
-  const adminToken = process.env.EXPO_PUBLIC_ADMIN_TOKEN ?? '';
   return {
+    'content-type': 'application/json',
+    ...(ADMIN_TOKEN ? { 'x-admin-token': ADMIN_TOKEN } : {}),
+    'x-account-key': accountKey,
     ...extra,
-    'X-Account-Key': accountKey,
-    ...(adminToken ? { 'X-Admin-Token': adminToken } : {}),
   };
 }
 
-async function parseRelayJson<T extends { error?: string }>(
+async function parseAdminJson<T extends { error?: string }>(
   response: Response,
 ): Promise<T> {
   const text = await response.text();
   if (!text.trim()) {
     if (!response.ok) {
-      throw new Error(`Relay error (${response.status})`);
+      throw new Error(`Admin API error (${response.status})`);
     }
     return {} as T;
   }
@@ -34,13 +38,13 @@ async function parseRelayJson<T extends { error?: string }>(
   } catch {
     throw new Error(
       response.ok
-        ? 'Relay returned a non-JSON response.'
-        : `Relay error (${response.status})`,
+        ? 'Admin API returned a non-JSON response.'
+        : `Admin API error (${response.status})`,
     );
   }
 }
 
-export async function fetchAutomationLogs(
+async function fetchLogsInternal(
   options: {
     accountKey?: AccountKey;
     status?: AutomationLogStatusFilter;
@@ -61,17 +65,96 @@ export async function fetchAutomationLogs(
     params.set('allAccounts', 'true');
   }
 
-  const response = await relayFetch(`/api/admin/logs?${params.toString()}`, {
+  const response = await fetch(`${ADMIN_BASE_URL}/logs?${params.toString()}`, {
     method: 'GET',
-    headers: adminRequestHeaders(accountKey),
+    headers: buildAdminHeaders(accountKey),
   });
 
-  const data = await parseRelayJson<{ logs?: AutomationLog[]; error?: string }>(response);
+  const data = await parseAdminJson<{ logs?: AutomationLog[]; error?: string }>(response);
   if (!response.ok) {
-    throw new Error(data.error ?? `Failed to load automation logs (${response.status})`);
+    throw new Error(data.error ?? 'Failed to fetch logs');
   }
 
   return data.logs ?? [];
+}
+
+async function triggerRetryInternal(
+  id: string,
+  accountKey: AccountKey = getActiveAccountKey(),
+): Promise<{
+  log: AutomationLog;
+  replayed: boolean;
+  message?: string;
+  result?: Record<string, unknown>;
+}> {
+  const response = await fetch(
+    `${ADMIN_BASE_URL}/logs/${encodeURIComponent(id)}/retry?accountKey=${encodeURIComponent(accountKey)}`,
+    {
+      method: 'POST',
+      headers: buildAdminHeaders(accountKey),
+      body: JSON.stringify({ accountKey }),
+    },
+  );
+
+  const data = await parseAdminJson<{
+    log?: AutomationLog;
+    replayed?: boolean;
+    message?: string;
+    result?: Record<string, unknown>;
+    error?: string;
+    details?: string;
+  }>(response);
+
+  if (!response.ok || !data.log) {
+    throw new Error(data.error ?? data.details ?? 'Retry failed');
+  }
+
+  return {
+    log: data.log,
+    replayed: Boolean(data.replayed),
+    message: data.message,
+    result: data.result,
+  };
+}
+
+export const adminLogsService = {
+  fetchLogs: async (accountKey: AccountKey): Promise<AutomationLog[]> => {
+    try {
+      return await fetchLogsInternal({ accountKey, allAccounts: true });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Could not load admin logs.';
+      console.error('[Logs Service Error]:', error);
+      Alert.alert('Error', message);
+      return [];
+    }
+  },
+
+  triggerRetry: async (id: string, accountKey: AccountKey): Promise<boolean> => {
+    try {
+      const result = await triggerRetryInternal(id, accountKey);
+      Alert.alert(
+        'Success',
+        result.message ?? 'Automation log replay completed successfully!',
+      );
+      return true;
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Retry failed';
+      console.error('[Retry Action Error]:', error);
+      Alert.alert('Retry Failed', message);
+      return false;
+    }
+  },
+};
+
+export async function fetchAutomationLogs(
+  options: {
+    accountKey?: AccountKey;
+    status?: AutomationLogStatusFilter;
+    limit?: number;
+    allAccounts?: boolean;
+  } = {},
+): Promise<AutomationLog[]> {
+  return fetchLogsInternal(options);
 }
 
 export async function replayAutomationLog(
@@ -83,32 +166,7 @@ export async function replayAutomationLog(
   message?: string;
   result?: Record<string, unknown>;
 }> {
-  const response = await relayFetch(`/api/admin/logs/${encodeURIComponent(logId)}/retry`, {
-    method: 'POST',
-    headers: adminRequestHeaders(accountKey, {
-      'Content-Type': 'application/json',
-    }),
-    body: JSON.stringify({ accountKey }),
-  });
-
-  const data = await parseRelayJson<{
-    log?: AutomationLog;
-    replayed?: boolean;
-    message?: string;
-    result?: Record<string, unknown>;
-    error?: string;
-  }>(response);
-
-  if (!response.ok || !data.log) {
-    throw new Error(data.error ?? `Failed to replay automation log (${response.status})`);
-  }
-
-  return {
-    log: data.log,
-    replayed: Boolean(data.replayed),
-    message: data.message,
-    result: data.result,
-  };
+  return triggerRetryInternal(logId, accountKey);
 }
 
 export function formatAutomationLogTimestamp(value: string): string {

@@ -123,13 +123,16 @@ export async function getDevicePushToken(): Promise<string | null> {
   return token.data;
 }
 
-export async function registerDeviceWithRelay(accountKey?: string): Promise<boolean> {
+export async function registerDeviceWithRelay(
+  accountKey?: string,
+  pushTokenOverride?: string | null,
+): Promise<boolean> {
   if (getNotificationMode() === 'expo-go-fallback') {
     return false;
   }
 
   try {
-    const pushToken = await getDevicePushToken();
+    const pushToken = pushTokenOverride ?? (await getDevicePushToken());
     if (!pushToken) return false;
 
     const previousToken = await AsyncStorage.getItem(PUSH_TOKEN_KEY);
