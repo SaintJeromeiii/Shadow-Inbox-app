@@ -210,6 +210,84 @@ async function resolveGmailMessageId(accountKey, { messageIdHeader, subject, tim
   return null;
 }
 
+const GMAIL_LIST_PAGE_SIZE = 100;
+const GMAIL_UNREAD_QUERY = 'is:unread in:inbox';
+
+/**
+ * List unread inbox messages (single Gmail API page).
+ */
+async function listUnreadInboxMessages(
+  accountKey,
+  { maxResults = GMAIL_LIST_PAGE_SIZE, pageToken = null, query = GMAIL_UNREAD_QUERY } = {},
+) {
+  const params = new URLSearchParams({
+    q: query,
+    maxResults: String(maxResults),
+  });
+
+  if (pageToken) {
+    params.set('pageToken', pageToken);
+  }
+
+  return gmailApiRequest(accountKey, `/messages?${params.toString()}`);
+}
+
+/**
+ * Walk nextPageToken until the full unread backlog is collected.
+ */
+async function listAllUnreadInboxMessageIds(accountKey, options = {}) {
+  const maxResults = options.maxResults || GMAIL_LIST_PAGE_SIZE;
+  const query = options.query || GMAIL_UNREAD_QUERY;
+  const hardCap =
+    options.hardCap ??
+    (Number(process.env.FETCH_MAX_UNREAD_CAP) > 0
+      ? Number(process.env.FETCH_MAX_UNREAD_CAP)
+      : 500);
+
+  const ids = [];
+  let pageToken = null;
+
+  do {
+    const payload = await listUnreadInboxMessages(accountKey, {
+      maxResults,
+      pageToken,
+      query,
+    });
+
+    for (const message of payload.messages || []) {
+      if (message?.id) {
+        ids.push(message.id);
+      }
+      if (ids.length >= hardCap) {
+        break;
+      }
+    }
+
+    if (ids.length >= hardCap) {
+      break;
+    }
+
+    pageToken = payload.nextPageToken || null;
+  } while (pageToken);
+
+  return ids;
+}
+
+async function getGmailMessageRaw(accountKey, messageId) {
+  const payload = await gmailApiRequest(
+    accountKey,
+    `/messages/${encodeURIComponent(messageId)}?format=raw`,
+  );
+
+  if (!payload?.raw) {
+    throw new Error(`Gmail message ${messageId} did not include raw content.`);
+  }
+
+  const normalized = payload.raw.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+  return Buffer.from(padded, 'base64');
+}
+
 module.exports = {
   gmailApiRequest,
   sendGmailMessage,
@@ -217,4 +295,9 @@ module.exports = {
   createLabel,
   modifyMessageLabels,
   resolveGmailMessageId,
+  listUnreadInboxMessages,
+  listAllUnreadInboxMessageIds,
+  getGmailMessageRaw,
+  GMAIL_LIST_PAGE_SIZE,
+  GMAIL_UNREAD_QUERY,
 };
