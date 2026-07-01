@@ -11,7 +11,8 @@ Use this before inviting beta testers or submitting to app stores.
   - `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET`
   - `AI_LIMIT_EXEMPT_ACCOUNT_KEYS=personal`
   - Optional: `AI_DAILY_*` / `AI_GLOBAL_DAILY_*` overrides
-  - Optional: `EXPO_PUBLIC_SENTRY_DSN` (after creating a Sentry project)
+  - Optional mobile crash reporting: `EXPO_PUBLIC_SENTRY_DSN` in **local `.env`** (not Railway) — rebuild app after adding
+  - Web landing page uses the Sentry loader script in `docs/index.html` (no env var needed)
 - [ ] Set **hard monthly spending limit** on OpenAI ($1 recommended):  
   https://platform.openai.com/settings/organization/limits
 - [ ] Deploy: `railway up`

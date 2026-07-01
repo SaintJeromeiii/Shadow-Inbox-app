@@ -1,6 +1,6 @@
 /**
- * Optional crash reporting — enabled when EXPO_PUBLIC_SENTRY_DSN is set.
- * Create a free project at https://sentry.io and add the DSN to Railway / .env.
+ * Optional crash reporting — enabled when EXPO_PUBLIC_SENTRY_DSN is set in local .env
+ * (or EAS build env). Railway backend env does NOT apply to the mobile app — rebuild after adding.
  */
 let sentryReady = false;
 

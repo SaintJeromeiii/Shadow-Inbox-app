@@ -95,6 +95,7 @@ module.exports = {
       emailRelayUrl:
         process.env.EXPO_PUBLIC_EMAIL_RELAY_URL ??
         'https://shadow-inbox-production.up.railway.app',
+      sentryDsn: process.env.EXPO_PUBLIC_SENTRY_DSN ?? '',
     },
     owner: 'jleonanderson12',
   },
