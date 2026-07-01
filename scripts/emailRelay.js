@@ -27,7 +27,7 @@ const { toPublicProfile, getOAuthAccount, removeOAuthAccount, hydrateOAuthTokenS
 const { ensureShadowLabelSet } = require('../backend/shadowLabels');
 const { applyShadowLabelsToNotification } = require('../backend/shadowLabels');
 const { writeNotifications } = require('../backend/notificationFeed');
-const { redraftReply } = require('../backend/redraftService');
+const { getOpenAiCircuitStatus } = require('../backend/openAiCircuitBreaker');
 const { consumeAiQuota, handleQuotaHttpError } = require('../backend/aiUsageService');
 const {
   registerDevicePushToken,
@@ -380,9 +380,11 @@ app.get('/api/emails', async (req, res) => {
   const SYNC_BUDGET_MS = 55_000;
 
   try {
+    let syncStats = null;
+
     if (shouldSync) {
       try {
-        await Promise.race([
+        syncStats = await Promise.race([
           fetchNotifications({ accountKey, silent: true }),
           new Promise((_, reject) => {
             setTimeout(
@@ -408,6 +410,14 @@ app.get('/api/emails', async (req, res) => {
       email: account.email,
       notifications,
       synced: shouldSync,
+      syncStats: syncStats
+        ? {
+            newCount: syncStats.newCount ?? 0,
+            aiProcessed: syncStats.aiProcessed ?? 0,
+            aiSkipped: syncStats.aiSkipped ?? 0,
+          }
+        : null,
+      openAiCircuit: getOpenAiCircuitStatus(),
     });
   } catch (error) {
     console.error(`[Relay] GET /api/emails failed for ${accountKey}:`, error);

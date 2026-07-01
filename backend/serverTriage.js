@@ -1,6 +1,11 @@
 const { loadKnowledgeBase } = require('./knowledgeBase');
 
 const { API_KEY, API_URL, MODEL } = require('./openaiConfig');
+const { tryConsumeAiQuota } = require('./aiUsageService');
+const {
+  isOpenAiCircuitOpen,
+  recordOpenAiFailure,
+} = require('./openAiCircuitBreaker');
 const USER_EMAIL = (
   process.env.EXPO_PUBLIC_USER_EMAIL ||
   process.env.IMAP_USER ||
@@ -230,7 +235,9 @@ async function callLlmApi(
 
     const payload = await response.json();
     if (!response.ok) {
-      throw new Error(payload?.error?.message || 'LLM triage failed.');
+      const error = new Error(payload?.error?.message || 'LLM triage failed.');
+      error.code = payload?.error?.code;
+      throw error;
     }
 
     const parsed = parseTriageResponse(payload?.choices?.[0]?.message?.content || '');
@@ -248,8 +255,18 @@ async function triageNotification(
   attachmentContent = null,
   memoryPromptBlock = '',
   calendarPromptBlock = '',
+  accountKey = 'personal',
 ) {
   if (!API_KEY || API_KEY.includes('your_')) {
+    return simulateTriage(notification, attachmentContent);
+  }
+
+  if (isOpenAiCircuitOpen()) {
+    return simulateTriage(notification, attachmentContent);
+  }
+
+  const allowed = await tryConsumeAiQuota(accountKey, 'triage', 1);
+  if (!allowed) {
     return simulateTriage(notification, attachmentContent);
   }
 
@@ -261,6 +278,7 @@ async function triageNotification(
       calendarPromptBlock,
     );
   } catch (error) {
+    recordOpenAiFailure(error);
     console.warn('[ServerTriage] Falling back to simulation:', error);
     return simulateTriage(notification, attachmentContent);
   }

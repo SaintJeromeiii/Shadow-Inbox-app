@@ -1,6 +1,10 @@
 const { OpenAI } = require('openai');
 
 const { MODEL } = require('../openaiConfig');
+const {
+  isOpenAiCircuitOpen,
+  recordOpenAiFailure,
+} = require('../openAiCircuitBreaker');
 
 let openaiClient = null;
 
@@ -35,6 +39,10 @@ async function analyzeEmail(sender, subject, bodyText) {
 
   if (!openai) {
     console.log('[AI Engine] Skipping classification: OPENAI_API_KEY is not defined.');
+    return { summary: subject, category: 'General', priority: 'medium' };
+  }
+
+  if (isOpenAiCircuitOpen()) {
     return { summary: subject, category: 'General', priority: 'medium' };
   }
 
@@ -81,6 +89,7 @@ async function analyzeEmail(sender, subject, bodyText) {
 
     return classification;
   } catch (error) {
+    recordOpenAiFailure(error);
     console.error('[AI Engine Error] Failed to classify email, falling back to defaults:', error);
     return {
       summary: `[Summary Fallback] ${subject}`,

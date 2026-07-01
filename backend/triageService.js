@@ -1,5 +1,6 @@
 const { getKnowledgeForTriage } = require('./userProfileService');
 const { reserveTriageQuota, DAILY_LIMIT, getDailyUsage } = require('./aiUsageService');
+const { recordOpenAiFailure } = require('./openAiCircuitBreaker');
 
 const API_KEY = process.env.OPENAI_API_KEY || '';
 const API_URL =
@@ -363,6 +364,7 @@ async function triageNotification(notification, accountKey) {
     const triage = await callLlmApi(notification, context);
     return { triage, mode: 'live' };
   } catch (error) {
+    recordOpenAiFailure(error);
     console.warn('[Triage] Live AI failed, using simulation:', error);
     return {
       triage: simulateTriage(notification, context.userEmail),

@@ -21,7 +21,7 @@ import {
   getNotificationDataSource,
 } from '../services/triageService';
 import { getSeedNotifications } from '../services/notificationData';
-import { fetchInboxFromRelay } from '../services/inboxService';
+import { fetchInboxFromRelay, type InboxFetchResult } from '../services/inboxService';
 import {
   loadPersistedNotifications,
   saveNotifications,
@@ -177,6 +177,7 @@ export default function HomeScreen({
   const [avatarReplayToken, setAvatarReplayToken] = useState(0);
   const [dailyEngagement, setDailyEngagement] = useState<DailyEngagement | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncSummary, setSyncSummary] = useState<string | null>(null);
   const insets = useSafeAreaInsets();
 
   const dataSource = getNotificationDataSource(activeAccount);
@@ -341,25 +342,48 @@ export default function HomeScreen({
   );
 
   const fetchRelayInboxSeed = useCallback(
-    async (accountKey: AccountKey, sync: boolean): Promise<RawNotification[]> => {
-      let seed = getSeedNotifications(accountKey);
+    async (accountKey: AccountKey, sync: boolean): Promise<InboxFetchResult> => {
+      const fallback = getSeedNotifications(accountKey);
 
       try {
-        const remote = await fetchInboxFromRelay(accountKey, sync);
-        if (remote.notifications.length > 0) {
-          return remote.notifications;
-        }
+        return await fetchInboxFromRelay(accountKey, sync);
       } catch (error) {
         console.warn(
           `[Shadow Inbox] Relay ${sync ? 'sync' : 'cache'} fetch failed for ${accountKey}:`,
           error,
         );
+        setSyncError(
+          error instanceof Error ? error.message : 'Could not reach the email relay.',
+        );
+        return {
+          accountKey,
+          notifications: fallback,
+          synced: sync,
+        };
       }
-
-      return seed;
     },
     [],
   );
+
+  const applySyncSummary = useCallback((remote: InboxFetchResult) => {
+    if (!remote.synced || !remote.syncStats) {
+      return;
+    }
+
+    setSyncError(null);
+    const { newCount, aiProcessed, aiSkipped } = remote.syncStats;
+
+    if (remote.openAiCircuitOpen) {
+      setSyncSummary(
+        `Smart sync · ${newCount} new · AI paused (quota) · ${aiSkipped} cached`,
+      );
+      return;
+    }
+
+    setSyncSummary(
+      `Smart sync · ${newCount} new · ${aiProcessed} triaged · ${aiSkipped} skipped`,
+    );
+  }, []);
 
   const runTriageOnNotifications = useCallback(
     async (
@@ -440,7 +464,11 @@ export default function HomeScreen({
       };
 
       try {
-        const cachedSeed = await fetchRelayInboxSeed(accountKey, false);
+        const cachedRemote = await fetchRelayInboxSeed(accountKey, false);
+        const cachedSeed =
+          cachedRemote.notifications.length > 0
+            ? cachedRemote.notifications
+            : getSeedNotifications(accountKey);
         let merged = await reloadInboxFromSource(accountKey, { seed: cachedSeed });
 
         if (merged.length > 0 || !sync) {
@@ -451,7 +479,12 @@ export default function HomeScreen({
           return merged;
         }
 
-        const syncedSeed = await fetchRelayInboxSeed(accountKey, true);
+        const syncedRemote = await fetchRelayInboxSeed(accountKey, true);
+        applySyncSummary(syncedRemote);
+        const syncedSeed =
+          syncedRemote.notifications.length > 0
+            ? syncedRemote.notifications
+            : cachedSeed;
         if (syncedSeed.length > 0 || cachedSeed.length === 0) {
           merged = await reloadInboxFromSource(accountKey, { seed: syncedSeed });
         }
@@ -467,7 +500,7 @@ export default function HomeScreen({
         loadingAccountRef.current = null;
       }
     },
-    [fetchRelayInboxSeed, reloadInboxFromSource, runTriageOnNotifications],
+    [applySyncSummary, fetchRelayInboxSeed, reloadInboxFromSource, runTriageOnNotifications],
   );
 
   useEffect(() => {
@@ -1287,9 +1320,10 @@ export default function HomeScreen({
               </View>
             </View>
             <Text style={styles.headerSubtitle}>
-              {unreadCount > 0
-                ? `${unreadCount} unread · ${activeProfile.label}`
-                : `${activeProfile.label} · ${dataSource} data`}
+              {syncSummary ??
+                (unreadCount > 0
+                  ? `${unreadCount} unread · ${activeProfile.label}`
+                  : `${activeProfile.label} · ${dataSource} data`)}
             </Text>
           </View>
         </View>

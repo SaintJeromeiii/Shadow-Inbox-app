@@ -5,10 +5,18 @@ import { getRelayUrl } from './emailService';
 const REQUEST_TIMEOUT_MS = 20_000;
 const SYNC_REQUEST_TIMEOUT_MS = 65_000;
 
+export interface InboxSyncStats {
+  newCount: number;
+  aiProcessed: number;
+  aiSkipped: number;
+}
+
 export interface InboxFetchResult {
   accountKey: AccountKey;
   notifications: RawNotification[];
   synced: boolean;
+  syncStats?: InboxSyncStats | null;
+  openAiCircuitOpen?: boolean;
 }
 
 async function fetchWithTimeout(
@@ -64,11 +72,15 @@ export async function fetchInboxFromRelay(
     accountKey: AccountKey;
     notifications: RawNotification[];
     synced?: boolean;
+    syncStats?: InboxSyncStats | null;
+    openAiCircuit?: { open?: boolean };
   };
 
   return {
     accountKey: data.accountKey,
     notifications: data.notifications ?? [],
     synced: Boolean(data.synced),
+    syncStats: data.syncStats ?? null,
+    openAiCircuitOpen: Boolean(data.openAiCircuit?.open),
   };
 }

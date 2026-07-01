@@ -20,6 +20,7 @@ const {
 } = require('./calendarIntentService');
 const { maybeAutoPilot } = require('./autoPilotService');
 const { maybeExtractFinance } = require('./financeExtractionService');
+const { logInboundEmailTriage } = require('./inboundEmailLog');
 const {
   loadActiveFirewallRules,
   evaluateFirewallForNotification,
@@ -181,7 +182,12 @@ async function enrichNotifications(
         attachmentContent,
         memoryRetrieval.promptBlock,
         calendarAudit.promptBlock,
+        accountKey,
       );
+
+      if (!previous?.triage) {
+        void logInboundEmailTriage(accountKey, withCalendar, triage);
+      }
 
       try {
         await saveMemoryEntry(accountKey, withCalendar, triage);

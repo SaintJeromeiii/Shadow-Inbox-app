@@ -14,11 +14,8 @@ const { simpleParser } = require('mailparser');
 const { getAccount, resolveAccountKey } = require('../backend/accounts');
 const { readNotifications, writeNotifications } = require('../backend/notificationFeed');
 const { openInbox } = require('../backend/imapAuth');
-const { enrichNotifications } = require('../backend/notificationEnrichment');
+const { enrichNotifications, mergeNotification } = require('../backend/notificationEnrichment');
 const { extractMailparserAttachments } = require('../backend/emailAttachments');
-const { analyzeEmail } = require('../backend/services/aiClassifier');
-const { sendPushNotification } = require('../backend/services/pushNotificationService');
-const { upsertLog, updateLogByMessageId } = require('../backend/automationLogsService');
 const {
   listAllUnreadInboxMessageIds,
   getGmailMessageRaw,
@@ -30,7 +27,6 @@ const FETCH_MAX_UNREAD =
   Number(process.env.FETCH_MAX_UNREAD) > 0 ? Number(process.env.FETCH_MAX_UNREAD) : null;
 const FETCH_MAX_UNREAD_CAP =
   Number(process.env.FETCH_MAX_UNREAD_CAP) > 0 ? Number(process.env.FETCH_MAX_UNREAD_CAP) : 500;
-const AI_BODY_MAX_CHARS = 1500;
 
 function stripHtml(html) {
   return html
@@ -83,124 +79,66 @@ function parseSubjectFromRawText(rawText) {
   return match?.[1]?.trim() || '(no subject)';
 }
 
-function parseBodyFromRawText(rawText) {
-  const parts = String(rawText || '').split(/\n\n/);
-  if (parts.length <= 1) {
-    return '';
-  }
-  return parts.slice(1).join('\n\n').trim();
+function notificationNeedsEnrichment(notification, previous) {
+  const merged = mergeNotification(previous, notification);
+  return !(merged.triage && merged.shadowLabels?.length);
 }
 
-/**
- * Strips HTML/CSS noise and caps length before GPT classification.
- */
-function prepareEmailTextForAi(rawText) {
-  let plain = String(rawText || '');
+async function finalizeNotificationBatch(accountKey, notifications, pendingAttachments, silent) {
+  const existing = await readNotifications(accountKey);
+  const previousIds = new Set(existing.map((item) => item.id));
+  const existingById = new Map(existing.map((item) => [item.id, item]));
 
-  if (/<[a-z][\s\S]*>/i.test(plain)) {
-    plain = stripHtml(plain);
-  }
+  const toEnrich = [];
+  const alreadyProcessed = [];
 
-  plain = plain
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/\{[^{}]*:[^{}]*;[^{}]*\}/g, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\r\n/g, '\n')
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .replace(/[ \t]{2,}/g, ' ')
-    .trim();
-
-  if (plain.length > AI_BODY_MAX_CHARS) {
-    plain = `${plain.slice(0, AI_BODY_MAX_CHARS).trim()}…`;
-  }
-
-  return plain;
-}
-
-async function classifyAndLogEmail(notification, accountKey) {
-  const subject = parseSubjectFromRawText(notification.rawText);
-  const body = prepareEmailTextForAi(parseBodyFromRawText(notification.rawText));
-
-  console.log(`[Processing] Analyzing incoming email ID: ${notification.id}`);
-
-  const aiAnalysis = await analyzeEmail(notification.sender, subject, body);
-
-  if (String(aiAnalysis.priority || '').toLowerCase() === 'high') {
-    try {
-      await sendPushNotification(
-        `🚨 High Priority: ${notification.sender}`,
-        aiAnalysis.summary,
-        {
-          logId: notification.id,
-          screen: 'admin_logs',
-          accountKey,
-          category: aiAnalysis.category,
-        },
-      );
-    } catch (error) {
-      console.error(
-        `[Processing] High-priority push failed for ${notification.id}:`,
-        error,
-      );
+  for (const notification of notifications) {
+    const previous = existingById.get(notification.id);
+    if (notificationNeedsEnrichment(notification, previous)) {
+      toEnrich.push(notification);
+    } else {
+      alreadyProcessed.push(mergeNotification(previous, notification));
     }
   }
 
-  const logPayload = {
-    notificationId: notification.id,
-    sender: notification.sender,
-    subject,
-    sourceApp: notification.sourceApp,
-    timestamp: notification.timestamp,
-    aiSummary: aiAnalysis.summary,
-    category: aiAnalysis.category,
-    priority: aiAnalysis.priority,
-    ...(aiAnalysis.ai_error ? { ai_error: aiAnalysis.ai_error } : {}),
-  };
+  if (!silent && alreadyProcessed.length > 0) {
+    console.log(
+      `[${accountKey}] Smart sync — skipping ${alreadyProcessed.length} already-triaged message(s).`,
+    );
+  }
 
-  try {
-    await upsertLog({
-      messageId: notification.id,
-      accountKey,
-      eventType: 'inbound_email',
-      status: 'processing',
-      payload: logPayload,
-    });
+  const enrichedNew =
+    toEnrich.length > 0
+      ? await enrichNotifications(accountKey, toEnrich, existing, {
+          pendingAttachments,
+        })
+      : [];
 
-    await updateLogByMessageId(notification.id, {
-      status: 'completed',
-      resultPayload: aiAnalysis,
-      errorMessage: aiAnalysis.ai_error ?? null,
-    });
-  } catch (error) {
-    console.error(
-      `[Processing] Failed to save automation log for ${notification.id}:`,
-      error,
+  const enrichedById = new Map([
+    ...alreadyProcessed.map((item) => [item.id, item]),
+    ...enrichedNew.map((item) => [item.id, item]),
+  ]);
+
+  const enriched = notifications.map(
+    (item) => enrichedById.get(item.id) || existingById.get(item.id) || item,
+  );
+
+  const newCount = enriched.filter((item) => !previousIds.has(item.id)).length;
+  await writeNotifications(accountKey, enriched);
+
+  if (!silent) {
+    console.log(
+      `[${accountKey}] Wrote ${enriched.length} notification(s) — ${toEnrich.length} AI processed, ${alreadyProcessed.length} skipped.`,
     );
   }
 
   return {
-    ...notification,
-    aiSummary: aiAnalysis.summary,
-    aiCategory: aiAnalysis.category,
-    aiPriority: aiAnalysis.priority,
+    accountKey,
+    newCount,
+    writtenCount: enriched.length,
+    aiProcessed: toEnrich.length,
+    aiSkipped: alreadyProcessed.length,
   };
-}
-
-async function applyAiClassificationToNotifications(notifications, accountKey) {
-  const classified = [];
-  for (const notification of notifications) {
-    classified.push(await classifyAndLogEmail(notification, accountKey));
-  }
-  return classified;
 }
 
 function openInboxFromConfig(config) {
@@ -344,32 +282,6 @@ async function buildNotificationsFromRawMessages(rawMessages) {
   );
 
   return { notifications, pendingAttachments };
-}
-
-async function finalizeNotificationBatch(accountKey, notifications, pendingAttachments, silent) {
-  const account = getAccount(resolveAccountKey(accountKey));
-  const previousIds = new Set((await readNotifications(accountKey)).map((item) => item.id));
-
-  const aiClassified = await applyAiClassificationToNotifications(notifications, accountKey);
-
-  const existing = await readNotifications(accountKey);
-  const enriched = await enrichNotifications(accountKey, aiClassified, existing, {
-    pendingAttachments,
-  });
-  const newCount = enriched.filter((item) => !previousIds.has(item.id)).length;
-  await writeNotifications(accountKey, enriched);
-
-  if (!silent) {
-    console.log(
-      `[${accountKey}] Wrote ${enriched.length} notification(s) to ${account.feedFile}`,
-    );
-  }
-
-  return {
-    accountKey,
-    newCount,
-    writtenCount: enriched.length,
-  };
 }
 
 async function parseMessage(buffer, uid, meta = {}) {
