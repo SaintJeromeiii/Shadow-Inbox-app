@@ -9,7 +9,6 @@ import type {
 } from '../types/automationLog';
 
 const ADMIN_BASE_URL = `${getRelayUrl()}/api/admin`;
-const ADMIN_TOKEN = process.env.EXPO_PUBLIC_ADMIN_TOKEN ?? '';
 const ADMIN_FETCH_TIMEOUT_MS = 15_000;
 const ADMIN_LOGS_CACHE_PREFIX = '@shadow_inbox/admin_logs_cache/';
 
@@ -77,7 +76,6 @@ function buildAdminHeaders(
 ): Record<string, string> {
   return {
     'content-type': 'application/json',
-    ...(ADMIN_TOKEN ? { 'x-admin-token': ADMIN_TOKEN } : {}),
     'x-account-key': accountKey,
     ...extra,
   };

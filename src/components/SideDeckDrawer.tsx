@@ -21,6 +21,7 @@ interface SideDeckDrawerProps {
   activeRoute: DrawerRoute;
   onNavigate: (route: DrawerRoute) => void;
   onClose: () => void;
+  showOpsConsole?: boolean;
 }
 
 const DRAWER_WIDTH = 288;
@@ -30,6 +31,7 @@ export default function SideDeckDrawer({
   activeRoute,
   onNavigate,
   onClose,
+  showOpsConsole = false,
 }: SideDeckDrawerProps) {
   const insets = useSafeAreaInsets();
   const slide = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
@@ -45,6 +47,9 @@ export default function SideDeckDrawer({
 
   const gridRows = Array.from({ length: 18 }, (_, index) => index);
   const gridCols = Array.from({ length: 10 }, (_, index) => index);
+  const secondaryItems = SECONDARY_DRAWER_ITEMS.filter(
+    (item) => item.route !== 'admin_logs' || showOpsConsole,
+  );
 
   return (
     <Modal visible={open} transparent animationType="none" onRequestClose={onClose}>
@@ -106,7 +111,7 @@ export default function SideDeckDrawer({
             <Text style={styles.sectionLabel}>SYS / CONFIG</Text>
 
             <View style={styles.menuSection}>
-              {SECONDARY_DRAWER_ITEMS.map((item) => {
+              {secondaryItems.map((item) => {
                 const isActive = activeRoute === item.route;
                 const isOpsConsole = item.route === 'admin_logs';
                 return (

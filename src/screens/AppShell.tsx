@@ -1,4 +1,4 @@
-import { useCallback, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
 import HomeScreen from './HomeScreen';
 import HeroStatusScreen from './HeroStatusScreen';
@@ -17,6 +17,7 @@ import { useCharacter } from '../context/CharacterContext';
 import { useRegisterPushNavigation } from '../context/PushNavigationContext';
 import { shouldEnterQuantumRealm } from '../utils/characterTransition';
 import { stopAllCharacterIntroAmbience } from '../services/retroSoundService';
+import { fetchAiUsage } from '../services/aiUsageService';
 import type { DrawerRoute } from '../types/navigation';
 
 function ScreenSlot({
@@ -40,6 +41,7 @@ export default function AppShell() {
   const { activeAccount, accounts, setActiveAccount } = useAccount();
   const { characterId, selectCharacter } = useCharacter();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [showOpsConsole, setShowOpsConsole] = useState(false);
   const [route, setRoute] = useState<DrawerRoute>('play_stage');
   const [pendingFocusEmailId, setPendingFocusEmailId] = useState<string | null>(null);
   const [notificationsSnapshot, setNotificationsSnapshot] = useState<
@@ -52,9 +54,26 @@ export default function AppShell() {
   }, []);
 
   const handleNavigate = useCallback((nextRoute: DrawerRoute) => {
+    if (nextRoute === 'admin_logs' && !showOpsConsole) {
+      return;
+    }
     setRoute(nextRoute);
     setDrawerOpen(false);
-  }, []);
+  }, [showOpsConsole]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void fetchAiUsage().then((usage) => {
+      if (!cancelled) {
+        setShowOpsConsole(Boolean(usage?.exempt));
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeAccount]);
 
   const handleJumpToEmail = useCallback((emailId: string) => {
     setPendingFocusEmailId(emailId);
@@ -191,6 +210,7 @@ export default function AppShell() {
         activeRoute={route}
         onNavigate={handleNavigate}
         onClose={() => setDrawerOpen(false)}
+        showOpsConsole={showOpsConsole}
       />
 
       {showQuantumTransition ? (
