@@ -20,7 +20,7 @@ Shadow Inbox uses **Expo push tokens** backed by **Firebase Cloud Messaging (FCM
 
 5. Download `google-services.json` → copy to project root **and** `android/app/`
 6. Fix API key in [Google Cloud → shadow-inbox-app → Credentials](https://console.cloud.google.com/apis/credentials?project=shadow-inbox-app):
-   - Key: `AIzaSyCkGXmSM212V51kgOtXMBTjFVFYcNzoKpg`
+   - Open the **Android key** whose value matches `client.api_key.current_key` in your local `google-services.json` (do not commit that file)
    - Enable **Firebase Installations API** + **Firebase Cloud Messaging API**
    - Application restrictions: **None** (testing) or Android app + SHA-1 above
 7. Rebuild from repo root (not `android/`):
