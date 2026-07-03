@@ -109,7 +109,6 @@ export default function AccountSwitcherSheet({
               const selected = account.key === activeAccount;
               const isOAuthAccount = Boolean(account.oauth);
               const isRemoving = removingAccountKey === account.key;
-              const signOutLabel = isOAuthAccount ? 'Disconnect' : 'Sign out';
 
               return (
                 <View key={account.key} style={styles.accountRowWrap}>
@@ -145,22 +144,21 @@ export default function AccountSwitcherSheet({
                   {onRemove ? (
                     <Pressable
                       style={({ pressed }) => [
-                        styles.removeButton,
-                        pressed && !isRemoving && styles.removeButtonPressed,
-                        isRemoving && styles.removeButtonDisabled,
+                        styles.signOutButton,
+                        pressed && !isRemoving && styles.signOutButtonPressed,
+                        isRemoving && styles.signOutButtonDisabled,
                       ]}
                       onPress={() => onRemove(account)}
                       disabled={isRemoving}
-                      accessibilityLabel={`${signOutLabel} ${account.label}`}
+                      accessibilityLabel={`Sign out ${account.label}`}
                     >
                       {isRemoving ? (
-                        <Ionicons name="hourglass-outline" size={18} color="#FF8A8A" />
+                        <Ionicons name="hourglass-outline" size={16} color="#FF8A8A" />
                       ) : (
-                        <Ionicons
-                          name={isOAuthAccount ? 'trash-outline' : 'log-out-outline'}
-                          size={18}
-                          color="#FF8A8A"
-                        />
+                        <>
+                          <Ionicons name="log-out-outline" size={16} color="#FF8A8A" />
+                          <Text style={styles.signOutButtonText}>Sign out</Text>
+                        </>
                       )}
                     </Pressable>
                   ) : null}
@@ -173,7 +171,12 @@ export default function AccountSwitcherSheet({
             <View style={styles.emptyAccounts}>
               <Text style={styles.emptyAccountsTitle}>No accounts on this device</Text>
               <Text style={styles.emptyAccountsBody}>
-                Sign out removed every inbox from this phone. Link a Google account to continue.
+                Every inbox was signed out on this device. Add a Google account below to
+                continue triaging mail.
+              </Text>
+              <Text style={styles.emptyAccountsHint}>
+                Personal relay accounts can be restored from your Mac relay (.env) after
+                you re-link Gmail.
               </Text>
             </View>
           ) : null}
@@ -314,20 +317,33 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
   },
-  removeButton: {
-    width: 44,
+  emptyAccountsHint: {
+    color: '#5C6478',
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  signOutButton: {
+    minWidth: 72,
     height: 44,
+    paddingHorizontal: 10,
     borderRadius: 14,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 4,
     backgroundColor: 'rgba(255, 138, 138, 0.08)',
     borderWidth: 1,
     borderColor: 'rgba(255, 138, 138, 0.22)',
   },
-  removeButtonPressed: {
+  signOutButtonText: {
+    color: '#FF8A8A',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  signOutButtonPressed: {
     opacity: 0.85,
   },
-  removeButtonDisabled: {
+  signOutButtonDisabled: {
     opacity: 0.55,
   },
   addGoogleButton: {

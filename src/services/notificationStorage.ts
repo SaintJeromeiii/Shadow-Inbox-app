@@ -19,8 +19,12 @@ export async function loadPersistedNotifications(
   }
 
   try {
-    const persisted = JSON.parse(raw) as TriagedNotification[];
-    return mergeWithSeed(seed, persisted);
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      console.warn('Persisted notifications were not an array, using seed data.');
+      return seed.map((notification) => ({ ...notification }));
+    }
+    return mergeWithSeed(seed, parsed as TriagedNotification[]);
   } catch (error) {
     console.warn('Failed to parse persisted notifications, using seed data:', error);
     return seed.map((notification) => ({ ...notification }));
@@ -41,6 +45,9 @@ export async function clearPersistedNotifications(
 }
 
 function dedupeNotificationsById<T extends { id: string }>(items: T[]): T[] {
+  if (!Array.isArray(items)) {
+    return [];
+  }
   const seen = new Set<string>();
   return items.filter((item) => {
     if (seen.has(item.id)) return false;
@@ -53,9 +60,11 @@ function mergeWithSeed(
   seed: RawNotification[],
   persisted: TriagedNotification[],
 ): TriagedNotification[] {
-  const persistedById = new Map(persisted.map((item) => [item.id, item]));
+  const safeSeed = Array.isArray(seed) ? seed : [];
+  const safePersisted = Array.isArray(persisted) ? persisted : [];
+  const persistedById = new Map(safePersisted.map((item) => [item.id, item]));
 
-  return dedupeNotificationsById(seed).map((seedItem) => {
+  return dedupeNotificationsById(safeSeed).map((seedItem) => {
     const saved = persistedById.get(seedItem.id);
     if (!saved) {
       return { ...seedItem };

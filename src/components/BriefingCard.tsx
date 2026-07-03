@@ -30,6 +30,7 @@ export default function BriefingCard({
   onDismiss,
 }: BriefingCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const isRefreshing = loading && briefing != null;
 
   return (
     <View style={styles.wrapper}>
@@ -51,6 +52,7 @@ export default function BriefingCard({
                   {briefing.stats.actionRequired} open cases · updated{' '}
                   {formatGeneratedAt(briefing.generatedAt)}
                   {briefing.mode === 'fallback' ? ' · local dossier' : ''}
+                  {isRefreshing ? ' · refreshing…' : ''}
                 </Text>
               ) : (
                 <Text style={styles.meta}>
@@ -59,11 +61,16 @@ export default function BriefingCard({
               )}
             </View>
           </View>
-          <Ionicons
-            name={expanded ? 'chevron-up' : 'chevron-down'}
-            size={18}
-            color={arcadeColors.neonCyan}
-          />
+          <View style={styles.headerRight}>
+            {isRefreshing ? (
+              <ActivityIndicator color={arcadeColors.neonCyan} size="small" />
+            ) : null}
+            <Ionicons
+              name={expanded ? 'chevron-up' : 'chevron-down'}
+              size={18}
+              color={arcadeColors.neonCyan}
+            />
+          </View>
         </Pressable>
 
         {expanded && (
@@ -75,7 +82,8 @@ export default function BriefingCard({
               </View>
             ) : null}
 
-            {error ? <Text style={styles.errorText}>{error}</Text> : null}
+            {error && !briefing ? <Text style={styles.errorText}>{error}</Text> : null}
+            {error && briefing ? <Text style={styles.warningText}>{error}</Text> : null}
 
             {briefing ? <MarkdownBriefing markdown={briefing.markdown} /> : null}
 
@@ -134,6 +142,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   headerLeft: {
     flexDirection: 'row',

@@ -101,26 +101,73 @@ async function getExpoProjectId(): Promise<string | undefined> {
   );
 }
 
-export async function getDevicePushToken(): Promise<string | null> {
+function isFisAuthError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return message.includes('FIS_AUTH_ERROR');
+}
+
+export type PushRegistrationState =
+  | 'ready'
+  | 'permission_denied'
+  | 'fis_auth_error'
+  | 'no_project_id'
+  | 'simulator'
+  | 'unavailable';
+
+export interface PushRegistrationResult {
+  state: PushRegistrationState;
+  token: string | null;
+  detail?: string;
+}
+
+export async function registerForPushNotificationsAsync(): Promise<PushRegistrationResult> {
   if (getNotificationMode() === 'expo-go-fallback') {
-    return null;
+    return { state: 'unavailable', token: null, detail: 'expo-go-fallback' };
   }
 
   if (!Device.isDevice) {
-    return null;
+    return { state: 'simulator', token: null };
   }
 
   const granted = await requestNotificationPermissions();
-  if (!granted) return null;
+  if (!granted) {
+    return { state: 'permission_denied', token: null };
+  }
 
   const projectId = await getExpoProjectId();
   if (!projectId) {
     console.warn('[Shadow Inbox] Missing Expo project ID — cannot fetch push token.');
-    return null;
+    return { state: 'no_project_id', token: null };
   }
 
-  const token = await Notifications.getExpoPushTokenAsync({ projectId });
-  return token.data;
+  try {
+    const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
+    console.log('[Push Token Generated]:', token);
+    await ensureAndroidNotificationChannel();
+    return { state: 'ready', token };
+  } catch (error) {
+    if (isFisAuthError(error)) {
+      console.warn('[Push] FIS_AUTH_ERROR — Firebase SHA-1 or API key mismatch.');
+      await ensureAndroidNotificationChannel();
+      return {
+        state: 'fis_auth_error',
+        token: null,
+        detail: error instanceof Error ? error.message : 'FIS_AUTH_ERROR',
+      };
+    }
+
+    console.error('[Push] Failed to fetch Expo push token:', error);
+    return {
+      state: 'unavailable',
+      token: null,
+      detail: error instanceof Error ? error.message : 'Push token unavailable',
+    };
+  }
+}
+
+export async function getDevicePushToken(): Promise<string | null> {
+  const result = await registerForPushNotificationsAsync();
+  return result.token;
 }
 
 export async function registerDeviceWithRelay(

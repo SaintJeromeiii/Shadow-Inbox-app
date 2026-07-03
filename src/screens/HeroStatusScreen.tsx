@@ -20,11 +20,16 @@ import { arcadeColors, arcadeFonts, arcadeTypography } from '../theme/arcadeThem
 
 interface HeroStatusScreenProps {
   onOpenDrawer: () => void;
+  isScreenFocused?: boolean;
 }
 
 const TIER_ORDER = [1, 2, 3, 4] as const;
+const HERO_STATUS_CACHE_MS = 45_000;
 
-export default function HeroStatusScreen({ onOpenDrawer }: HeroStatusScreenProps) {
+export default function HeroStatusScreen({
+  onOpenDrawer,
+  isScreenFocused = true,
+}: HeroStatusScreenProps) {
   const { activeAccount } = useAccount();
   const { character, characterId } = useCharacter();
   const [stats, setStats] = useState<PlayerStats | null>(null);
@@ -33,19 +38,24 @@ export default function HeroStatusScreen({ onOpenDrawer }: HeroStatusScreenProps
   const loadStats = useCallback(async () => {
     setLoading(true);
     try {
-      const next = await fetchPlayerStats(activeAccount, characterId);
+      const next = await fetchPlayerStats(activeAccount, characterId, {
+        maxAgeMs: HERO_STATUS_CACHE_MS,
+      });
       setStats(next);
     } catch (error) {
       console.warn('[Hero Status] Failed to load stats:', error);
-      setStats(buildPlayerStats(0));
+      setStats((prev) => prev ?? buildPlayerStats(0));
     } finally {
       setLoading(false);
     }
   }, [activeAccount, characterId]);
 
   useEffect(() => {
+    if (!isScreenFocused) {
+      return;
+    }
     void loadStats();
-  }, [loadStats]);
+  }, [isScreenFocused, loadStats]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -55,7 +65,11 @@ export default function HeroStatusScreen({ onOpenDrawer }: HeroStatusScreenProps
         </Pressable>
         <View>
           <Text style={styles.title}>HERO STATUS</Text>
-          <Text style={styles.subtitle}>Armor upgrades & combat record</Text>
+          <Text style={styles.subtitle}>
+            {loading && stats
+              ? 'Refreshing combat record…'
+              : 'Armor upgrades & combat record'}
+          </Text>
         </View>
       </View>
 
@@ -63,12 +77,12 @@ export default function HeroStatusScreen({ onOpenDrawer }: HeroStatusScreenProps
         <View style={styles.loadingState}>
           <ActivityIndicator color={arcadeColors.neonCyan} size="large" />
         </View>
-      ) : (
+      ) : stats ? (
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          {stats ? <PlayerAvatarCard stats={stats} /> : null}
+          <PlayerAvatarCard stats={stats} />
 
           <View style={styles.tierPanel}>
             <Text style={styles.panelTitle}>ARMOR PROGRESSION</Text>
@@ -111,7 +125,7 @@ export default function HeroStatusScreen({ onOpenDrawer }: HeroStatusScreenProps
             </Text>
           </View>
         </ScrollView>
-      )}
+      ) : null}
     </SafeAreaView>
   );
 }

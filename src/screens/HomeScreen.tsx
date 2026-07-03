@@ -11,6 +11,7 @@ import {
   LayoutAnimation,
   Platform,
   UIManager,
+  AppState,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -33,10 +34,13 @@ import {
   alertNewActionRequiredItems,
   loadAlertedActionIds,
   registerDeviceWithRelay,
-  requestNotificationPermissions,
+  registerForPushNotificationsAsync,
 } from '../services/pushNotifications';
 import { useAccount } from '../context/AccountContext';
+import { usePushStatus } from '../context/PushStatusContext';
 import AccountSwitcherSheet from '../components/AccountSwitcherSheet';
+import PushStatusBanner from '../components/PushStatusBanner';
+import RelayStatusBanner from '../components/RelayStatusBanner';
 import VoiceNoteButton from '../components/VoiceNoteButton';
 import { useGoogleSignIn } from '../hooks/useGoogleSignIn';
 import { useFeedVoiceRecording } from '../hooks/useFeedVoiceRecording';
@@ -68,6 +72,10 @@ import { getStageDifficulty, isBossLevel } from '../utils/stageDifficulty';
 import { useCharacter } from '../context/CharacterContext';
 import { fetchDailyEngagement, recordDailyClearance, type DailyEngagement } from '../services/dailyEngagementService';
 import { stopAllCharacterIntroAmbience } from '../services/retroSoundService';
+import {
+  loadSeenFighterIntros,
+  markFighterIntroSeen,
+} from '../services/fighterIntroStorage';
 
 interface HomeScreenProps {
   onOpenDrawer: () => void;
@@ -76,6 +84,8 @@ interface HomeScreenProps {
   onNotificationsChange?: (notifications: TriagedNotification[]) => void;
   isScreenFocused?: boolean;
 }
+
+const HOME_PLAYER_STATS_CACHE_MS = 30_000;
 
 const TABS: { key: FeedTab; label: string }[] = [
   { key: 'action_required', label: 'OPEN CASES' },
@@ -173,11 +183,15 @@ export default function HomeScreen({
   const playerStatsRef = useRef<PlayerStats | null>(null);
   const { playDeleteSound, showActionComplete, triggerLevelUp } = useRetroFeedback();
   const { characterId } = useCharacter();
+  const { status: pushStatus } = usePushStatus();
   const [playerStats, setPlayerStats] = useState<PlayerStats | null>(null);
   const [avatarReplayToken, setAvatarReplayToken] = useState(0);
   const [dailyEngagement, setDailyEngagement] = useState<DailyEngagement | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncSummary, setSyncSummary] = useState<string | null>(null);
+  const [pushBannerDismissed, setPushBannerDismissed] = useState(false);
+  const [seenFighterIntros, setSeenFighterIntros] = useState<Set<string>>(new Set());
+  const foregroundSyncRef = useRef(false);
   const insets = useSafeAreaInsets();
 
   const dataSource = getNotificationDataSource(activeAccount);
@@ -190,12 +204,25 @@ export default function HomeScreen({
   );
 
   useEffect(() => {
+    void loadSeenFighterIntros().then(setSeenFighterIntros);
+  }, []);
+
+  const handleFighterIntroComplete = useCallback(() => {
+    void markFighterIntroSeen(characterId).then(() => {
+      setSeenFighterIntros((prev) => new Set(prev).add(characterId));
+    });
+  }, [characterId]);
+
+  useEffect(() => {
+    if (!isScreenFocused) {
+      return;
+    }
     void fetchDailyEngagement()
       .then(setDailyEngagement)
       .catch((error) => {
         console.warn('[Shadow Inbox] Could not load daily engagement:', error);
       });
-  }, [activeAccount]);
+  }, [activeAccount, isScreenFocused]);
 
   useEffect(() => {
     const intervalId = setInterval(() => {
@@ -208,15 +235,27 @@ export default function HomeScreen({
   useEffect(() => {
     let cancelled = false;
 
+    if (!isScreenFocused) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
     async function loadPlayerStats() {
       try {
-        const stats = await fetchPlayerStats(activeAccount, characterId);
+        const stats = await fetchPlayerStats(activeAccount, characterId, {
+          maxAgeMs: HOME_PLAYER_STATS_CACHE_MS,
+        });
         if (cancelled) return;
         playerStatsRef.current = stats;
         setPlayerStats(stats);
       } catch (error) {
         console.warn('[Shadow Inbox] Failed to load player stats:', error);
         if (cancelled) return;
+        if (playerStatsRef.current) {
+          setPlayerStats(playerStatsRef.current);
+          return;
+        }
         const fallback = buildPlayerStats(0);
         playerStatsRef.current = fallback;
         setPlayerStats(fallback);
@@ -228,7 +267,7 @@ export default function HomeScreen({
     return () => {
       cancelled = true;
     };
-  }, [activeAccount, characterId]);
+  }, [activeAccount, characterId, isScreenFocused]);
 
   useEffect(() => {
     stopAllCharacterIntroAmbience();
@@ -280,14 +319,14 @@ export default function HomeScreen({
     let cancelled = false;
 
     async function setupNotifications() {
-      const granted = await requestNotificationPermissions();
+      const registration = await registerForPushNotificationsAsync();
       if (cancelled) return;
 
-      setNotificationsEnabled(granted);
+      setNotificationsEnabled(registration.state === 'ready' && Boolean(registration.token));
       alertedActionIdsRef.current = await loadAlertedActionIds();
 
-      if (granted) {
-        await registerDeviceWithRelay();
+      if (registration.token) {
+        await registerDeviceWithRelay(activeAccount, registration.token);
       }
     }
 
@@ -296,10 +335,10 @@ export default function HomeScreen({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [activeAccount]);
 
   useEffect(() => {
-    if (!hydrated || !notificationsEnabled) return;
+    if (!isScreenFocused || !hydrated || !notificationsEnabled) return;
 
     let cancelled = false;
 
@@ -324,7 +363,7 @@ export default function HomeScreen({
     return () => {
       cancelled = true;
     };
-  }, [notifications, hydrated, notificationsEnabled, activeProfile.label]);
+  }, [notifications, hydrated, notificationsEnabled, activeProfile.label, isScreenFocused]);
 
   const reloadInboxFromSource = useCallback(
     async (
@@ -504,7 +543,36 @@ export default function HomeScreen({
   );
 
   useEffect(() => {
-    if (!accountReady) return;
+    if (!accountReady || !isScreenFocused) return;
+
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState !== 'active' || foregroundSyncRef.current) {
+        return;
+      }
+
+      foregroundSyncRef.current = true;
+      void applyInboxReload(activeAccount, true)
+        .catch((error) => {
+          console.warn('[Shadow Inbox] Foreground inbox sync failed:', error);
+        })
+        .finally(() => {
+          foregroundSyncRef.current = false;
+        });
+
+      void fetchDailyEngagement()
+        .then(setDailyEngagement)
+        .catch((error) => {
+          console.warn('[Shadow Inbox] Foreground engagement refresh failed:', error);
+        });
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [accountReady, activeAccount, applyInboxReload, isScreenFocused]);
+
+  useEffect(() => {
+    if (!accountReady || !isScreenFocused) return;
 
     let cancelled = false;
     setRefreshing(true);
@@ -518,7 +586,7 @@ export default function HomeScreen({
     return () => {
       cancelled = true;
     };
-  }, [accountReady, activeAccount, applyInboxReload]);
+  }, [accountReady, activeAccount, applyInboxReload, isScreenFocused]);
 
   useEffect(() => {
     onNotificationsChange?.(notifications);
@@ -579,15 +647,15 @@ export default function HomeScreen({
   const handleRemoveAccount = useCallback(
     (account: AccountProfile) => {
       const isOAuthAccount = Boolean(account.oauth);
-      const title = isOAuthAccount ? 'Disconnect Google Account' : 'Sign Out';
+      const title = 'Sign Out';
       const message = isOAuthAccount
-        ? `Disconnect ${account.email} from Shadow Inbox? This removes stored OAuth tokens and the local feed on your Mac relay.`
+        ? `Sign out of ${account.email}? This removes the linked inbox from this device and clears stored Google tokens on the relay.`
         : `Sign out of ${account.label} on this device? IMAP credentials stay on your Mac relay (.env) — this only hides the inbox here and clears cached messages.`;
 
       Alert.alert(title, message, [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: isOAuthAccount ? 'Disconnect' : 'Sign Out',
+          text: 'Sign Out',
           style: 'destructive',
           onPress: () => {
             void (async () => {
@@ -597,12 +665,13 @@ export default function HomeScreen({
                   const result = await removeRelayAccount(account.key);
                   if (!result.success) {
                     Alert.alert(
-                      'Disconnect Failed',
-                      result.error ?? 'Could not remove this account from the relay.',
+                      'Sign Out Failed',
+                      result.error ?? 'Could not sign out of this Google account.',
                     );
                     return;
                   }
                   await signOutFromGoogle();
+                  await hideAccountOnDevice(account.key);
                 } else {
                   await hideAccountOnDevice(account.key);
                 }
@@ -629,10 +698,10 @@ export default function HomeScreen({
                 }
               } catch (error) {
                 Alert.alert(
-                  isOAuthAccount ? 'Disconnect Failed' : 'Sign Out Failed',
+                  'Sign Out Failed',
                   error instanceof Error
                     ? error.message
-                    : 'Could not remove this account.',
+                    : 'Could not sign out of this account.',
                 );
               } finally {
                 setRemovingAccountKey(null);
@@ -719,6 +788,12 @@ export default function HomeScreen({
     [activeFolderCount],
   );
   const bossLevelActive = isBossLevel(activeFolderCount);
+  const celebrationPulseActive =
+    bossLevelActive ||
+    Boolean(dailyEngagement?.goalMet) ||
+    (hydrated && activeTab === 'action_required' && activeFolderCount === 0);
+  const showFighterIntro =
+    isScreenFocused && !seenFighterIntros.has(characterId);
 
   const actionRequiredItems = useMemo(
     () =>
@@ -791,14 +866,22 @@ export default function HomeScreen({
           <PlayerAvatarCard
             stats={playerStats}
             inboxCount={activeFolderCount}
-            enableIntro
+            enableIntro={showFighterIntro}
             replayToken={avatarReplayToken}
+            onIntroComplete={handleFighterIntroComplete}
           />
         ) : null}
 
         {dailyEngagement ? (
-          <View style={styles.dailyGoalBanner}>
-            <Text style={styles.dailyGoalTitle}>DAILY CLEARANCE</Text>
+          <View
+            style={[
+              styles.dailyGoalBanner,
+              dailyEngagement.goalMet && styles.dailyGoalBannerComplete,
+            ]}
+          >
+            <Text style={styles.dailyGoalTitle}>
+              {dailyEngagement.goalMet ? 'DAILY GOAL COMPLETE' : 'DAILY CLEARANCE'}
+            </Text>
             <View style={styles.dailyGoalTrack}>
               <View
                 style={[
@@ -860,6 +943,9 @@ export default function HomeScreen({
       stageDifficulty,
       activeFolderCount,
       activeFolderLabel,
+      showFighterIntro,
+      handleFighterIntroComplete,
+      isScreenFocused,
     ],
   );
 
@@ -1263,7 +1349,9 @@ export default function HomeScreen({
     );
   };
 
-  if (!hydrated || !accountReady) {
+  const showBootLoader = !accountReady || (!hydrated && notifications.length === 0);
+
+  if (showBootLoader) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.loadingState}>
@@ -1320,10 +1408,12 @@ export default function HomeScreen({
               </View>
             </View>
             <Text style={styles.headerSubtitle}>
-              {syncSummary ??
-                (unreadCount > 0
-                  ? `${unreadCount} unread · ${activeProfile.label}`
-                  : `${activeProfile.label} · ${dataSource} data`)}
+              {refreshing
+                ? `Syncing ${activeProfile.label}…`
+                : syncSummary ??
+                  (unreadCount > 0
+                    ? `${unreadCount} unread · ${activeProfile.label}`
+                    : `${activeProfile.label} · ${dataSource} data`)}
             </Text>
           </View>
         </View>
@@ -1411,6 +1501,17 @@ export default function HomeScreen({
         ) : null}
       </View>
 
+      {!pushBannerDismissed ? (
+        <PushStatusBanner
+          status={pushStatus}
+          onDismiss={() => setPushBannerDismissed(true)}
+        />
+      ) : null}
+
+      {syncError && hydrated ? (
+        <RelayStatusBanner message={syncError} stale={notifications.length > 0} />
+      ) : null}
+
       {selectionMode ? (
         <View style={styles.selectionChipRow}>
           <Pressable
@@ -1476,7 +1577,7 @@ export default function HomeScreen({
         onClose={() => setAccountSheetVisible(false)}
       />
 
-      <BossLevelPulseFrame active={bossLevelActive}>
+      <BossLevelPulseFrame active={celebrationPulseActive}>
       <FlatList
         ref={flatListRef}
         style={styles.feedList}
@@ -2058,6 +2159,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     gap: 6,
+  },
+  dailyGoalBannerComplete: {
+    borderColor: arcadeColors.neonPink,
+    backgroundColor: 'rgba(40, 10, 30, 0.82)',
   },
   dailyGoalTitle: {
     fontFamily: arcadeFonts.pixel,

@@ -79,6 +79,7 @@ export default function FinanceRunwayStrip({
   }, [summary]);
 
   const transactions = summary?.transactions ?? [];
+  const isRefreshing = loading && summary != null;
 
   const handleMetricScrollEnd = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const index = Math.round(event.nativeEvent.contentOffset.x / METRIC_PAGE_WIDTH);
@@ -92,7 +93,11 @@ export default function FinanceRunwayStrip({
         <View style={styles.headerRow}>
           <View style={styles.headerCopy}>
             <Text style={styles.title}>OPERATION WAR CHEST</Text>
-            <Text style={styles.subtitle}>FIELD EXPENSES // CASE FUNDS</Text>
+            <Text style={styles.subtitle}>
+              {isRefreshing
+                ? 'FIELD EXPENSES // refreshing runway…'
+                : 'FIELD EXPENSES // CASE FUNDS'}
+            </Text>
           </View>
           {loading ? <ActivityIndicator color={arcadeColors.neonGreen} size="small" /> : null}
         </View>

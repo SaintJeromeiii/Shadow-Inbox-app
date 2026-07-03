@@ -16,6 +16,7 @@ interface PlayerAvatarCardProps {
   enableIntro?: boolean;
   enableIntroAudio?: boolean;
   replayToken?: number;
+  onIntroComplete?: () => void;
 }
 
 export default function PlayerAvatarCard({
@@ -24,6 +25,7 @@ export default function PlayerAvatarCard({
   enableIntro = false,
   enableIntroAudio = false,
   replayToken = 0,
+  onIntroComplete,
 }: PlayerAvatarCardProps) {
   const { character, characterId } = useCharacter();
   const progressPercent = Math.round(stats.progress * 100);
@@ -53,6 +55,7 @@ export default function PlayerAvatarCard({
             enableIntro={enableIntro}
             enableIntroAudio={enableIntroAudio}
             replayToken={replayToken}
+            onIntroEnd={onIntroComplete}
           />
         </View>
 

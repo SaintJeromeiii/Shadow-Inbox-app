@@ -42,7 +42,7 @@ const CHARACTER_INTRO_AMBIENCE: Partial<
 > = {
   black_male: { key: 'wardenIntroPulse', volume: 0.72 },
   robot_neutral: { key: 'robotIntroGears', volume: 0.74 },
-  quantum_neutral: { key: 'quantumIntroHum', volume: 0.52 },
+  quantum_neutral: { key: 'quantumIntroHum', volume: 0.9 },
 };
 
 let audioReady = false;
@@ -107,6 +107,18 @@ function pauseIntroPlayer(key: RetroSoundKey) {
   }
 }
 
+function pauseAllCharacterIntroPlayers(): void {
+  const introKeys = new Set(
+    Object.values(CHARACTER_INTRO_AMBIENCE)
+      .map((config) => config?.key)
+      .filter((key): key is RetroSoundKey => Boolean(key)),
+  );
+
+  for (const key of introKeys) {
+    pauseIntroPlayer(key);
+  }
+}
+
 export function playRetroSound(key: RetroSoundKey): Promise<void> {
   playQueue = playQueue.then(async () => {
     try {
@@ -125,6 +137,24 @@ export function playCharacterDeleteSound(characterId: CharacterId): Promise<void
   return playRetroSound(key);
 }
 
+/** Play the fighter intro sting once (no session bookkeeping). */
+export function playCharacterIntroSound(characterId: CharacterId): Promise<void> {
+  const config =
+    CHARACTER_INTRO_AMBIENCE[characterId as keyof typeof CHARACTER_INTRO_AMBIENCE];
+  if (!config) {
+    return Promise.resolve();
+  }
+
+  return runOnMainThread(async () => {
+    try {
+      pauseAllCharacterIntroPlayers();
+      await playSoundInternal(config.key, config.volume);
+    } catch (error) {
+      console.warn('[RetroSound] Intro sound failed:', error);
+    }
+  });
+}
+
 /** Start looping intro ambience — caller must stop when the intro video ends. */
 export async function startCharacterIntroAmbience(
   characterId: CharacterId,
@@ -138,23 +168,18 @@ export async function startCharacterIntroAmbience(
     return;
   }
 
-  introActiveSessions.set(sessionId, config.key);
-
   try {
     await ensureAudioMode();
+    pauseAllCharacterIntroPlayers();
     const player = getPlayer(config.key);
     player.loop = true;
     player.volume = config.volume;
     await player.seekTo(0);
+    introActiveSessions.set(sessionId, config.key);
     player.play();
   } catch (error) {
     introActiveSessions.delete(sessionId);
     console.warn('[RetroSound] Intro ambience failed:', error);
-    return;
-  }
-
-  if (!introActiveSessions.has(sessionId)) {
-    pauseIntroPlayer(config.key);
   }
 }
 

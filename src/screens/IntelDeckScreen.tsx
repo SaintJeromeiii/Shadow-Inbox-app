@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -14,6 +14,7 @@ import BriefingCard from '../components/BriefingCard';
 import TaskBoard from '../components/TaskBoard';
 import FinanceRunwayStrip from '../components/FinanceRunwayStrip';
 import TimelineScroller from '../components/TimelineScroller';
+import RelayStatusBanner from '../components/RelayStatusBanner';
 import { ArcadeHamburgerIcon } from '../components/ArcadeIcons';
 import {
   dismissBriefingForToday,
@@ -26,18 +27,25 @@ import type { DailyBriefing } from '../types/briefing';
 import type { ExtractedTask } from '../types/task';
 import type { FinanceSummary } from '../types/finance';
 import type { TriagedNotification } from '../types/notification';
+import type { AccountKey } from '../types/account';
 import { arcadeColors, arcadeFonts } from '../theme/arcadeTheme';
 
 interface IntelDeckScreenProps {
   onOpenDrawer: () => void;
   onJumpToEmail: (emailId: string) => void;
   notifications: TriagedNotification[];
+  isScreenFocused?: boolean;
 }
+
+const BRIEFING_REFRESH_MS = 60_000;
+const TASKS_REFRESH_MS = 45_000;
+const FINANCE_REFRESH_MS = 45_000;
 
 export default function IntelDeckScreen({
   onOpenDrawer,
   onJumpToEmail,
   notifications,
+  isScreenFocused = true,
 }: IntelDeckScreenProps) {
   const { activeAccount, setActiveAccount } = useAccount();
   const [briefing, setBriefing] = useState<DailyBriefing | null>(null);
@@ -48,13 +56,35 @@ export default function IntelDeckScreen({
   const [tasksLoading, setTasksLoading] = useState(false);
   const [financeSummary, setFinanceSummary] = useState<FinanceSummary | null>(null);
   const [financeLoading, setFinanceLoading] = useState(false);
+  const briefingFetchedAtRef = useRef<number>(0);
+  const tasksFetchedAtRef = useRef<number>(0);
+  const financeFetchedAtRef = useRef<number>(0);
+  const briefingAccountRef = useRef<AccountKey | null>(null);
+  const tasksAccountRef = useRef<AccountKey | null>(null);
+  const financeAccountRef = useRef<AccountKey | null>(null);
+  const briefingRequestRef = useRef(false);
+  const tasksRequestRef = useRef(false);
+  const financeRequestRef = useRef(false);
 
-  const refreshBriefing = useCallback(async () => {
+  const refreshBriefing = useCallback(async (force = false) => {
+    if (briefingRequestRef.current) {
+      return;
+    }
+
     const dismissed = await isBriefingDismissedForToday();
     if (dismissed) {
       setBriefingHidden(true);
       return;
     }
+
+    const now = Date.now();
+    const sameAccount = briefingAccountRef.current === activeAccount;
+    if (!force && sameAccount && briefing && now - briefingFetchedAtRef.current < BRIEFING_REFRESH_MS) {
+      setBriefingHidden(false);
+      return;
+    }
+
+    briefingRequestRef.current = true;
     setBriefingHidden(false);
     setBriefingLoading(true);
     setBriefingError(null);
@@ -62,49 +92,89 @@ export default function IntelDeckScreen({
       const triageByAccount = { [activeAccount]: notifications };
       const result = await fetchDailyBriefing(triageByAccount);
       setBriefing(result);
+      briefingFetchedAtRef.current = Date.now();
+      briefingAccountRef.current = activeAccount;
     } catch (error) {
       setBriefingError(
         error instanceof Error ? error.message : 'Could not load crime bulletin.',
       );
     } finally {
+      briefingRequestRef.current = false;
       setBriefingLoading(false);
     }
-  }, [activeAccount, notifications]);
+  }, [activeAccount, briefing, notifications]);
 
-  const loadTasks = useCallback(async () => {
+  const loadTasks = useCallback(async (force = false) => {
+    if (tasksRequestRef.current) {
+      return;
+    }
+
+    const now = Date.now();
+    const sameAccount = tasksAccountRef.current === activeAccount;
+    if (!force && sameAccount && tasks.length > 0 && now - tasksFetchedAtRef.current < TASKS_REFRESH_MS) {
+      return;
+    }
+
+    tasksRequestRef.current = true;
     setTasksLoading(true);
     try {
       const result = await fetchExtractedTasks(activeAccount);
       setTasks(result);
+      tasksFetchedAtRef.current = Date.now();
+      tasksAccountRef.current = activeAccount;
     } catch (error) {
       console.warn('[Intel Deck] Task load failed:', error);
     } finally {
+      tasksRequestRef.current = false;
       setTasksLoading(false);
     }
-  }, [activeAccount]);
+  }, [activeAccount, tasks.length]);
 
-  const loadFinances = useCallback(async () => {
+  const loadFinances = useCallback(async (force = false) => {
+    if (financeRequestRef.current) {
+      return;
+    }
+
+    const now = Date.now();
+    const sameAccount = financeAccountRef.current === activeAccount;
+    if (
+      !force &&
+      sameAccount &&
+      financeSummary &&
+      now - financeFetchedAtRef.current < FINANCE_REFRESH_MS
+    ) {
+      return;
+    }
+
+    financeRequestRef.current = true;
     setFinanceLoading(true);
     try {
       const summary = await fetchFinanceSummary(activeAccount);
       setFinanceSummary(summary);
+      financeFetchedAtRef.current = Date.now();
+      financeAccountRef.current = activeAccount;
     } catch (error) {
       console.warn('[Intel Deck] Finance load failed:', error);
     } finally {
+      financeRequestRef.current = false;
       setFinanceLoading(false);
     }
-  }, [activeAccount]);
+  }, [activeAccount, financeSummary]);
 
   useEffect(() => {
+    if (!isScreenFocused) {
+      return;
+    }
     void refreshBriefing();
     void loadTasks();
     void loadFinances();
-  }, [refreshBriefing, loadTasks, loadFinances]);
+  }, [isScreenFocused, refreshBriefing, loadTasks, loadFinances]);
 
   const handleToggleTask = useCallback(async (task: ExtractedTask) => {
     try {
       const result = await toggleExtractedTask(task.id);
       setTasks((prev) => prev.map((item) => (item.id === task.id ? result.task : item)));
+      tasksFetchedAtRef.current = Date.now();
     } catch (error) {
       Alert.alert(
         'Task Sync Failed',
@@ -135,6 +205,10 @@ export default function IntelDeckScreen({
           <Text style={styles.subtitle}>Briefings, quests & runway intel</Text>
         </View>
       </View>
+
+      {briefingError ? (
+        <RelayStatusBanner message={briefingError} stale={Boolean(briefing)} />
+      ) : null}
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {!briefingHidden && (

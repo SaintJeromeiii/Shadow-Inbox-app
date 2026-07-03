@@ -10,7 +10,8 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
-import DynamicAvatar, { AVATAR_ASPECT_RATIO } from '../components/DynamicAvatar';
+import FighterIntroPreview from '../components/FighterIntroPreview';
+import { AVATAR_ASPECT_RATIO } from '../components/DynamicAvatar';
 import { ArcadeHamburgerIcon } from '../components/ArcadeIcons';
 import { useAccount } from '../context/AccountContext';
 import { getCharacterRegistryEntry } from '../constants/characters';
@@ -20,9 +21,10 @@ import {
 } from '../data/characters';
 import { fetchAllCharacterStats } from '../services/userProgressService';
 import {
-  startCharacterIntroAmbience,
-  stopCharacterIntroAmbience,
-} from '../services/retroSoundService';
+  loadSeenFighterIntros,
+  markFighterIntroSeen,
+} from '../services/fighterIntroStorage';
+import { stopAllCharacterIntroAmbience } from '../services/retroSoundService';
 import type { CharacterId } from '../types/character';
 import type { PlayerStats } from '../types/userProgress';
 import { buildPlayerStats } from '../utils/playerProgress';
@@ -32,6 +34,7 @@ interface CharacterSelectScreenProps {
   initialCharacterId: CharacterId;
   onConfirm: (characterId: CharacterId) => void;
   variant?: 'intro' | 'switch';
+  isActive?: boolean;
   onCancel?: () => void;
   onOpenDrawer?: () => void;
 }
@@ -64,17 +67,20 @@ export default function CharacterSelectScreen({
   initialCharacterId,
   onConfirm,
   variant = 'intro',
+  isActive = true,
   onCancel,
   onOpenDrawer,
 }: CharacterSelectScreenProps) {
   const insets = useSafeAreaInsets();
   const { activeAccount } = useAccount();
   const blink = useRef(new Animated.Value(1)).current;
+  const wasActiveRef = useRef(isActive);
   const [selectedId, setSelectedId] = useState<CharacterId>(initialCharacterId);
   const [previewToken, setPreviewToken] = useState(0);
   const [progressByCharacter, setProgressByCharacter] = useState<
     Partial<Record<CharacterId, PlayerStats>>
   >({});
+  const [seenFighterIntros, setSeenFighterIntros] = useState<Set<CharacterId>>(new Set());
 
   const isSwitchMode = variant === 'switch';
   const playableIds = PLAYABLE_CHARACTERS.map((character) => character.id);
@@ -98,29 +104,35 @@ export default function CharacterSelectScreen({
   }, [initialCharacterId]);
 
   useEffect(() => {
+    void loadSeenFighterIntros().then(setSeenFighterIntros);
+  }, []);
+
+  useEffect(() => {
     void loadProgress();
   }, [loadProgress]);
 
+  const shouldPlayIntro = isActive && !seenFighterIntros.has(selectedId);
+
   useEffect(() => {
-    if (variant !== 'intro') {
+    if (!isActive) {
+      wasActiveRef.current = false;
+      stopAllCharacterIntroAmbience();
       return;
     }
 
-    const sessionId = `fighter-select-${selectedId}`;
-    void startCharacterIntroAmbience(selectedId, sessionId);
+    const becameActive = !wasActiveRef.current;
+    wasActiveRef.current = true;
 
+    if (becameActive && isSwitchMode && !seenFighterIntros.has(selectedId)) {
+      setPreviewToken((token) => token + 1);
+    }
+  }, [isActive, isSwitchMode, selectedId, seenFighterIntros]);
+
+  useEffect(() => {
     return () => {
-      stopCharacterIntroAmbience(sessionId);
+      stopAllCharacterIntroAmbience();
     };
-  }, [variant, selectedId]);
-
-  useEffect(() => {
-    if (variant !== 'intro') {
-      return;
-    }
-
-    setPreviewToken((token) => token + 1);
-  }, [variant]);
+  }, []);
 
   useEffect(() => {
     const loop = Animated.loop(
@@ -147,11 +159,17 @@ export default function CharacterSelectScreen({
   const handleSelect = (characterId: CharacterId) => {
     void Haptics.selectionAsync();
     setSelectedId(characterId);
-    setPreviewToken((token) => token + 1);
+    if (!seenFighterIntros.has(characterId)) {
+      setPreviewToken((token) => token + 1);
+    }
   };
 
   const handleConfirm = () => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    stopAllCharacterIntroAmbience();
+    void markFighterIntroSeen(selectedId).then(() => {
+      setSeenFighterIntros((prev) => new Set(prev).add(selectedId));
+    });
     onConfirm(selectedId);
   };
 
@@ -182,13 +200,10 @@ export default function CharacterSelectScreen({
 
       <View style={styles.previewPanel}>
         <View style={styles.previewFrame} collapsable={false}>
-          <DynamicAvatar
+          <FighterIntroPreview
             characterId={selectedId}
-            visualTier={1}
-            enableIntro
-            enableIntroAudio={false}
-            holdIntro={variant === 'intro'}
-            replayToken={previewToken}
+            replayKey={previewToken}
+            isActive={shouldPlayIntro}
           />
         </View>
 

@@ -26,8 +26,13 @@ Run on a **physical device** with a production or preview build (`npx expo run:a
 
 ## Push (if configured)
 
+See **`docs/push-setup.md`** for Firebase SHA-1 + API key setup.
+
+- [ ] Settings → **AI STATUS** shows **Push alerts: Active**
+- [ ] Logs show `ExponentPushToken[...]` (not `FIS_AUTH_ERROR`)
 - [ ] Send yourself a high-priority test email
 - [ ] Tap push notification — app opens correct message / account
+- [ ] Return from background — inbox refreshes automatically
 
 ## AI limits (second Gmail account)
 
@@ -61,9 +66,22 @@ curl -s -H "x-account-key: google_shadowinboxtest_gmail_com" \
 
 ## Regression
 
-- [ ] Fighter select video/audio plays on character screen
-- [ ] Home screen loads without `stopAllCharacterIntroAmbience` error
-- [ ] No client-side OpenAI key in app bundle (AI only via relay)
+Run from repo root before device testing:
+
+```bash
+chmod +x scripts/verify-no-client-openai.sh
+./scripts/verify-no-client-openai.sh
+```
+
+- [ ] Fighter select video/audio plays on character screen (intro **and** drawer → Change Fighter)
+- [ ] Home screen loads without `stopAllCharacterIntroAmbience` error (rebuild after pull: `npx expo run:android --device`)
+- [ ] `verify-no-client-openai.sh` passes (AI only via relay)
+
+**Fighter select tips:** Intro video plays **once per fighter** (first selection). Use **Settings → Clear local data** to replay onboarding, or pick a fighter you haven't selected before on **Change Fighter**.
+
+## Beta release
+
+See **`docs/beta-release.md`** and **`docs/supabase-migrations.md`** before shipping to waitlist testers.
 
 ## Sign-off
 

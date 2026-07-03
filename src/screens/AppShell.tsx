@@ -16,6 +16,7 @@ import { useAccount } from '../context/AccountContext';
 import { useCharacter } from '../context/CharacterContext';
 import { useRegisterPushNavigation } from '../context/PushNavigationContext';
 import { shouldEnterQuantumRealm } from '../utils/characterTransition';
+import { stopAllCharacterIntroAmbience } from '../services/retroSoundService';
 import type { DrawerRoute } from '../types/navigation';
 
 function ScreenSlot({
@@ -84,6 +85,7 @@ export default function AppShell() {
 
   const handleFighterConfirm = useCallback(
     (nextCharacterId: typeof characterId) => {
+      stopAllCharacterIntroAmbience();
       void selectCharacter(nextCharacterId).then(() => {
         if (shouldEnterQuantumRealm(nextCharacterId)) {
           setShowQuantumTransition(true);
@@ -110,6 +112,7 @@ export default function AppShell() {
       <ScreenSlot active={route === 'fighter_select'}>
         <CharacterSelectScreen
           variant="switch"
+          isActive={route === 'fighter_select'}
           initialCharacterId={characterId}
           onConfirm={handleFighterConfirm}
           onCancel={goToPlayStage}
@@ -122,7 +125,10 @@ export default function AppShell() {
       </ScreenSlot>
 
       <ScreenSlot active={route === 'hero_status'}>
-        <HeroStatusScreen onOpenDrawer={openDrawer} />
+        <HeroStatusScreen
+          onOpenDrawer={openDrawer}
+          isScreenFocused={route === 'hero_status'}
+        />
       </ScreenSlot>
 
       <ScreenSlot active={route === 'intel_deck'}>
@@ -130,6 +136,7 @@ export default function AppShell() {
           onOpenDrawer={openDrawer}
           onJumpToEmail={handleJumpToEmail}
           notifications={notificationsSnapshot}
+          isScreenFocused={route === 'intel_deck'}
         />
       </ScreenSlot>
 

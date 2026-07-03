@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { ArcadeHamburgerIcon } from '../components/ArcadeIcons';
 import PrivacyPolicyScreen from './PrivacyPolicyScreen';
 import { useAccount } from '../context/AccountContext';
+import { usePushStatus } from '../context/PushStatusContext';
 import { useGoogleSignIn } from '../hooks/useGoogleSignIn';
 import { removeRelayAccount } from '../services/authService';
 import { hideAccountOnDevice, unhideAccountOnDevice } from '../services/accountStorage';
@@ -47,6 +48,7 @@ export default function SettingsScreen({
 }: SettingsScreenProps) {
   const { activeAccount, activeProfile, accounts, refreshAccounts, setActiveAccount } =
     useAccount();
+  const { status: pushStatus } = usePushStatus();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -192,6 +194,18 @@ export default function SettingsScreen({
             </Text>
             <Text style={styles.metaText}>Relay: {getRelayUrl()}</Text>
             <Text style={styles.metaText}>Account: {activeProfile.label}</Text>
+            <Text style={styles.metaText}>
+              Push alerts:{' '}
+              {pushStatus.state === 'ready'
+                ? 'Active'
+                : pushStatus.state === 'pending'
+                  ? 'Checking…'
+                  : pushStatus.state === 'fis_auth_error'
+                    ? 'Firebase misconfigured (see docs/push-setup.md)'
+                    : pushStatus.state === 'permission_denied'
+                      ? 'Notifications disabled in system settings'
+                      : 'Unavailable on this build'}
+            </Text>
             {aiUsage ? (
               <>
                 <Text style={[styles.metaText, styles.usageHeading]}>DAILY AI LIMITS</Text>

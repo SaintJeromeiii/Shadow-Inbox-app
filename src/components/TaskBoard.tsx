@@ -207,9 +207,12 @@ export default function TaskBoard({
     setActiveGroupIndex(index);
   };
 
-  const summaryLabel = loading
+  const isRefreshing = loading && tasks.length > 0;
+  const summaryLabel = loading && tasks.length === 0
     ? 'Syncing action items…'
-    : `${activeCount} open task${activeCount === 1 ? '' : 's'}`;
+    : isRefreshing
+      ? `${activeCount} open task${activeCount === 1 ? '' : 's'} · syncing…`
+      : `${activeCount} open task${activeCount === 1 ? '' : 's'}`;
 
   return (
     <View style={styles.wrapper}>
@@ -227,7 +230,7 @@ export default function TaskBoard({
           </View>
           <View style={styles.headerActions}>
             {loading ? <ActivityIndicator color={arcadeColors.neonPurple} size="small" /> : null}
-            {!loading && activeCount > 0 ? (
+            {!isRefreshing && activeCount > 0 ? (
               <View style={styles.countPill}>
                 <Text style={styles.countPillText}>{activeCount}</Text>
               </View>

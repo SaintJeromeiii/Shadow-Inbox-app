@@ -32,11 +32,12 @@ export interface DynamicAvatarProps {
   /** Inbox signal count — drives visual tier when visualTier is omitted. */
   inboxCount?: number;
   enableIntro?: boolean;
-  /** Looped motion ambience — off when the parent screen owns audio. */
+  /** Play intro ambience in sync with the intro clip. */
   enableIntroAudio?: boolean;
-  /** Keep intro video playing (fighter select preview). */
+  /** When true, loop video + ambience; default is play once then show still. */
   holdIntro?: boolean;
   replayToken?: number;
+  onIntroEnd?: () => void;
 }
 
 interface AvatarIntroVideoProps {
@@ -60,17 +61,41 @@ function AvatarIntroVideo({
   onEndRef.current = onEnd;
   const audioStartedRef = useRef(false);
   const playbackStartedRef = useRef(false);
+  const finishedRef = useRef(false);
 
   const player = useVideoPlayer(source, (instance) => {
-    instance.loop = loopIntro;
+    instance.loop = false;
     instance.muted = true;
     instance.audioMixingMode = 'mixWithOthers';
+    instance.timeUpdateEventInterval = 0.25;
   });
 
   useEffect(() => {
     let active = true;
+    let safetyTimer: ReturnType<typeof setTimeout> | null = null;
     audioStartedRef.current = false;
     playbackStartedRef.current = false;
+    finishedRef.current = false;
+    player.loop = loopIntro;
+
+    const finishIntro = () => {
+      if (!active || finishedRef.current || loopIntro || !playbackStartedRef.current) {
+        return;
+      }
+      finishedRef.current = true;
+      if (safetyTimer) {
+        clearTimeout(safetyTimer);
+        safetyTimer = null;
+      }
+      try {
+        player.loop = false;
+        player.pause();
+      } catch {
+        // Player may already be released.
+      }
+      stopCharacterIntroAmbience(sessionId);
+      onEndRef.current();
+    };
 
     const startAudio = () => {
       if (!active || !enableIntroAudio || audioStartedRef.current) {
@@ -81,17 +106,22 @@ function AvatarIntroVideo({
     };
 
     const beginPlayback = () => {
-      if (!active || playbackStartedRef.current) {
+      if (!active || playbackStartedRef.current || finishedRef.current) {
         return;
       }
       playbackStartedRef.current = true;
       try {
+        player.loop = loopIntro;
         player.currentTime = 0;
         player.play();
       } catch {
         playbackStartedRef.current = false;
+        return;
       }
       startAudio();
+      if (!loopIntro) {
+        safetyTimer = setTimeout(finishIntro, 10_000);
+      }
     };
 
     const statusSubscription = player.addListener('statusChange', ({ status }) => {
@@ -101,49 +131,59 @@ function AvatarIntroVideo({
     });
 
     const playingSubscription = player.addListener('playingChange', ({ isPlaying }) => {
+      if (!active || finishedRef.current || loopIntro) {
+        return;
+      }
       if (isPlaying) {
         startAudio();
+        return;
+      }
+      if (!playbackStartedRef.current) {
+        return;
+      }
+      const duration = player.duration;
+      const currentTime = player.currentTime;
+      if (duration > 0 && currentTime >= duration - 0.3) {
+        finishIntro();
       }
     });
 
     const endSubscription = player.addListener('playToEnd', () => {
-      if (!active || loopIntro) {
-        return;
-      }
-
-      stopCharacterIntroAmbience(sessionId);
-      onEndRef.current();
+      finishIntro();
     });
+
+    const timeSubscription = loopIntro
+      ? null
+      : player.addListener('timeUpdate', ({ currentTime }) => {
+          const duration = player.duration;
+          if (duration > 0 && currentTime >= duration - 0.2) {
+            finishIntro();
+          }
+        });
 
     const kickoff = InteractionManager.runAfterInteractions(() => {
       requestAnimationFrame(() => {
-        if (!active) {
+        if (!active || finishedRef.current) {
           return;
         }
-
         if (player.status === 'readyToPlay') {
           beginPlayback();
-          return;
-        }
-
-        // Nudge load after screen transitions (e.g. Press Start → fighter select).
-        try {
-          player.currentTime = 0;
-        } catch {
-          // Player may not be ready yet — statusChange will start playback.
         }
       });
     });
 
     return () => {
       active = false;
+      if (safetyTimer) {
+        clearTimeout(safetyTimer);
+      }
       kickoff.cancel();
       statusSubscription.remove();
       playingSubscription.remove();
       endSubscription.remove();
+      timeSubscription?.remove();
       stopCharacterIntroAmbience(sessionId);
     };
-    // Player lifetime matches this keyed mount — avoid re-running on player identity churn.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, characterId, enableIntroAudio, loopIntro]);
 
@@ -168,6 +208,7 @@ export default function DynamicAvatar({
   enableIntroAudio = false,
   holdIntro = false,
   replayToken = 0,
+  onIntroEnd,
 }: DynamicAvatarProps) {
   const { characterId: activeCharacterId } = useCharacter();
   const characterId = characterIdProp ?? activeCharacterId;
@@ -197,7 +238,8 @@ export default function DynamicAvatar({
     if (!holdIntro) {
       setIsVideoPlaying(false);
     }
-  }, [holdIntro]);
+    onIntroEnd?.();
+  }, [holdIntro, onIntroEnd]);
 
   return (
     <View style={styles.frame} collapsable={false}>

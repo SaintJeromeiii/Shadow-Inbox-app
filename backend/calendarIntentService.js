@@ -5,6 +5,7 @@ const {
   formatSlotLabel,
   DEFAULT_TIMEZONE,
 } = require('./calendarService');
+const { getAccount, resolveAccountKey } = require('./accounts');
 const { tryConsumeAiQuota } = require('./aiUsageService');
 
 const { API_KEY, API_URL, MODEL } = require('./openaiConfig');
@@ -201,10 +202,39 @@ function applyCalendarGuard(notification, guard) {
   };
 }
 
+function buildUnavailableCalendarGuard(parsed, badgeMessage) {
+  return {
+    checked: true,
+    status: 'unavailable',
+    isFree: null,
+    proposedWindow: {
+      label: parsed.windowLabel,
+      start: parsed.startIso,
+      end: parsed.endIso,
+    },
+    conflictEvent: null,
+    surroundingEvents: [],
+    alternativeSlots: [],
+    badgeMessage,
+  };
+}
+
 async function auditCalendarForEmail(accountKey, notification) {
   const parsed = await parseSchedulingWindow(notification, accountKey);
   if (!parsed?.hasSchedulingIntent) {
     return { guard: null, promptBlock: '' };
+  }
+
+  const account = getAccount(resolveAccountKey(accountKey));
+  if (!account?.oauth) {
+    const guard = buildUnavailableCalendarGuard(
+      parsed,
+      `Scheduling detected: ${parsed.windowLabel}`,
+    );
+    return {
+      guard,
+      promptBlock: buildCalendarPromptBlock(guard),
+    };
   }
 
   const durationMinutes = Math.max(
@@ -280,20 +310,12 @@ async function auditCalendarForEmail(accountKey, notification) {
     );
 
     const guard = {
-      checked: true,
-      status: 'unavailable',
-      isFree: null,
-      proposedWindow: {
-        label: parsed.windowLabel,
-        start: parsed.startIso,
-        end: parsed.endIso,
-      },
-      conflictEvent: null,
-      surroundingEvents: [],
-      alternativeSlots: [],
-      badgeMessage: needsScope
-        ? 'Calendar Guard: Re-link Google account with Calendar access'
-        : `Scheduling detected: ${parsed.windowLabel}`,
+      ...buildUnavailableCalendarGuard(
+        parsed,
+        needsScope
+          ? 'Calendar Guard: Re-link Google account with Calendar access'
+          : `Scheduling detected: ${parsed.windowLabel}`,
+      ),
       error: error.message,
       needsCalendarScope: needsScope,
     };

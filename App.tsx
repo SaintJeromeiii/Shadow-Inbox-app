@@ -17,12 +17,16 @@ import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { arcadeColors } from './src/theme/arcadeTheme';
 import { shouldEnterQuantumRealm } from './src/utils/characterTransition';
 import { PushNavigationProvider } from './src/context/PushNavigationContext';
+import { PushStatusProvider } from './src/context/PushStatusContext';
+import { configureNotificationHandler } from './src/services/pushNotifications';
 import { isOnboardingComplete, setOnboardingComplete } from './src/services/onboardingStorage';
 import { isArcadeGateComplete, setArcadeGateComplete } from './src/services/sessionStorage';
 import { fetchUserProfile } from './src/services/userProfileService';
 import { refreshTriageMode } from './src/services/triageService';
+import { stopAllCharacterIntroAmbience } from './src/services/retroSoundService';
 
 WebBrowser.maybeCompleteAuthSession();
+configureNotificationHandler();
 
 function AppSession() {
   const [onboardingReady, setOnboardingReady] = useState(false);
@@ -112,6 +116,7 @@ function AppSession() {
         variant="intro"
         initialCharacterId={characterId}
         onConfirm={(nextCharacterId) => {
+          stopAllCharacterIntroAmbience();
           void selectCharacter(nextCharacterId).then(async () => {
             await setArcadeGateComplete(true);
             if (shouldEnterQuantumRealm(nextCharacterId)) {
@@ -127,10 +132,12 @@ function AppSession() {
 
   return (
     <RetroFeedbackProvider>
-      <PushNavigationProvider>
-        <NotificationBootstrap />
-        <AppShell />
-      </PushNavigationProvider>
+      <PushStatusProvider>
+        <PushNavigationProvider>
+          <NotificationBootstrap />
+          <AppShell />
+        </PushNavigationProvider>
+      </PushStatusProvider>
     </RetroFeedbackProvider>
   );
 }
