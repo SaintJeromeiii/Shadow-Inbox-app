@@ -18,6 +18,7 @@ Host the marketing + legal site from this folder.
 | `about.html` | About the creator |
 | `privacy.html` | Privacy policy |
 | `terms.html` | Terms of use |
+| `delete-account.html` | Account deletion instructions |
 
 ## Waitlist API on GitHub Pages
 
