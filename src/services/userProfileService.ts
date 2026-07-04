@@ -17,11 +17,16 @@ function normalizeProfile(input: Partial<UserProfile> | null | undefined): UserP
 
 export async function fetchUserProfile(): Promise<UserProfile> {
   const local = await readLocalProfile<UserProfile>();
+  const headers = relayHeaders();
+
+  if (!headers['X-Account-Key']) {
+    return normalizeProfile(local);
+  }
 
   try {
     const response = await relayFetch('/api/user/profile', {
       method: 'GET',
-      headers: relayHeaders(),
+      headers,
     });
 
     if (!response.ok) {
@@ -42,11 +47,16 @@ export async function saveUserProfile(updates: Partial<UserProfile>): Promise<Us
   const current = normalizeProfile(await readLocalProfile<UserProfile>());
   const merged = normalizeProfile({ ...current, ...updates });
   await writeLocalProfile(merged);
+  const headers = relayHeaders();
+
+  if (!headers['X-Account-Key']) {
+    return merged;
+  }
 
   try {
     const response = await relayFetch('/api/user/profile', {
       method: 'PUT',
-      headers: relayHeaders(),
+      headers,
       body: JSON.stringify({ profile: merged }),
     });
 

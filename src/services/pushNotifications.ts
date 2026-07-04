@@ -188,6 +188,9 @@ export async function registerDeviceWithRelay(
     }
 
     const resolvedAccountKey = accountKey ?? getActiveAccountKey();
+    if (!resolvedAccountKey) {
+      return false;
+    }
     const response = await fetch(`${getRelayUrl()}/api/notifications/register-token`, {
       method: 'POST',
       headers: {

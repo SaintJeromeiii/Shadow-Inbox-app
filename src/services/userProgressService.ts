@@ -89,6 +89,10 @@ export async function fetchPlayerStats(
   characterId: CharacterId = getActiveCharacterId(),
   options: { force?: boolean; maxAgeMs?: number } = {},
 ): Promise<PlayerStats> {
+  if (!accountKey) {
+    return loadStatsWithLocalFallback(accountKey, characterId);
+  }
+
   const { force = false, maxAgeMs = PLAYER_STATS_CACHE_TTL_MS } = options;
   if (!force) {
     const cached = getCachedPlayerStats(accountKey, characterId, maxAgeMs);
@@ -126,6 +130,13 @@ export async function recordPlayerDeletion(
   accountKey: AccountKey = getActiveAccountKey(),
   characterId: CharacterId = getActiveCharacterId(),
 ): Promise<PlayerStats> {
+  if (!accountKey) {
+    const localDeletions = await loadLocalCharacterDeletions(accountKey, characterId);
+    const nextDeletions = localDeletions + Math.max(0, count);
+    await saveLocalCharacterDeletions(accountKey, characterId, nextDeletions);
+    return setCachedPlayerStats(accountKey, characterId, buildPlayerStats(nextDeletions));
+  }
+
   const response = await relayFetch('/api/user/stats/deletion', {
     method: 'POST',
     headers: {
@@ -152,6 +163,17 @@ export async function fetchAllCharacterStats(
   accountKey: AccountKey = getActiveAccountKey(),
   characterIds: CharacterId[] = getUnlockedCharacterIds(),
 ): Promise<Partial<Record<CharacterId, PlayerStats>>> {
+  if (!accountKey) {
+    const entries = await Promise.all(
+      characterIds.map(async (characterId) => {
+        const stats = await loadStatsWithLocalFallback(accountKey, characterId);
+        return [characterId, stats] as const;
+      }),
+    );
+
+    return Object.fromEntries(entries) as Partial<Record<CharacterId, PlayerStats>>;
+  }
+
   const entries = await Promise.all(
     characterIds.map(async (characterId) => {
       const stats = await fetchPlayerStats(accountKey, characterId);

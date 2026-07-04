@@ -71,10 +71,10 @@ export default function OnboardingScreen({ onComplete }: OnboardingScreenProps) 
       return toneNotes.trim().length >= 12;
     }
     if (step === 'GMAIL') {
-      return true;
+      return __DEV__ ? true : gmailLinked;
     }
     return acceptedPrivacy;
-  }, [acceptedPrivacy, displayName, roleTitle, step, toneNotes]);
+  }, [acceptedPrivacy, displayName, gmailLinked, roleTitle, step, toneNotes]);
 
   const goNext = () => {
     if (!canContinue) return;
@@ -220,8 +220,9 @@ export default function OnboardingScreen({ onComplete }: OnboardingScreenProps) 
           {step === 'GMAIL' ? (
             <View style={styles.block}>
               <Text style={styles.copy}>
-                Connect Gmail to pull your real inbox. You can skip and link later from the inbox
-                screen.
+                {__DEV__
+                  ? 'Connect Gmail to pull your real inbox. You can skip and link later from the inbox screen.'
+                  : 'Connect Gmail to continue. Production builds only work with a linked Google account.'}
               </Text>
               {gmailLinked ? (
                 <View style={styles.linkedBanner}>
@@ -247,8 +248,9 @@ export default function OnboardingScreen({ onComplete }: OnboardingScreenProps) 
               )}
               {!isGoogleConfigured ? (
                 <Text style={styles.hint}>
-                  Google OAuth is not configured in this build. Skip for now and add your account
-                  later.
+                  {__DEV__
+                    ? 'Google OAuth is not configured in this build. Skip for now and add your account later.'
+                    : 'Google OAuth is not configured in this build. Rebuild after fixing the production Google sign-in setup.'}
                 </Text>
               ) : null}
             </View>

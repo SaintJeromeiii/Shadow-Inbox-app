@@ -7,6 +7,24 @@ const {
   toPublicProfile,
 } = require('./userTokens');
 
+function isCloudRuntime() {
+  return Boolean(
+    process.env.RAILWAY_ENVIRONMENT ||
+      process.env.RAILWAY_PROJECT_ID ||
+      process.env.RENDER ||
+      process.env.FLY_APP_NAME ||
+      (process.env.PORT && !process.env.EMAIL_RELAY_PORT),
+  );
+}
+
+function shouldExposeBuiltinAccounts() {
+  if (String(process.env.SHADOW_INBOX_EXPOSE_BUILTIN_ACCOUNTS || '').toLowerCase() === 'true') {
+    return true;
+  }
+
+  return !isCloudRuntime();
+}
+
 function readEnv(prefix, name, fallback = '') {
   return process.env[`${prefix}${name}`] || (prefix ? '' : process.env[name]) || fallback;
 }
@@ -85,20 +103,28 @@ function listAccountKeys() {
   return [...listBuiltinAccountKeys(), ...listOAuthAccountKeys()];
 }
 
+function listPublicAccountKeys() {
+  return shouldExposeBuiltinAccounts()
+    ? listAccountKeys()
+    : listOAuthAccountKeys();
+}
+
 function listAccounts() {
-  const builtin = listBuiltinAccountKeys().map((key) => {
-    const account = getAccount(key);
-    return {
-      key: account.key,
-      label: account.label,
-      email: account.email,
-      initials: account.initials,
-      accentColor: account.accentColor,
-      mockOnly: Boolean(account.mockOnly),
-      oauth: false,
-      imapConfigured: Boolean(account.imap.user && account.imap.password),
-    };
-  });
+  const builtin = shouldExposeBuiltinAccounts()
+    ? listBuiltinAccountKeys().map((key) => {
+        const account = getAccount(key);
+        return {
+          key: account.key,
+          label: account.label,
+          email: account.email,
+          initials: account.initials,
+          accentColor: account.accentColor,
+          mockOnly: Boolean(account.mockOnly),
+          oauth: false,
+          imapConfigured: Boolean(account.imap.user && account.imap.password),
+        };
+      })
+    : [];
 
   const oauth = listOAuthAccountKeys()
     .map((key) => getOAuthAccount(key))
@@ -110,10 +136,24 @@ function listAccounts() {
 
 function resolveAccountKey(raw) {
   const key = String(raw || 'personal').trim().toLowerCase();
-  if (ACCOUNT_DEFINITIONS[key] || getOAuthAccount(key)) {
+  const publicKeys = listPublicAccountKeys();
+  if (publicKeys.includes(key)) {
     return key;
   }
-  return 'personal';
+
+  if (ACCOUNT_DEFINITIONS[key] || getOAuthAccount(key)) {
+    return publicKeys[0] ?? (shouldExposeBuiltinAccounts() ? key : '');
+  }
+
+  if (!key || key === 'personal') {
+    return publicKeys[0] ?? (shouldExposeBuiltinAccounts() ? 'personal' : '');
+  }
+
+  if (publicKeys.length === 1) {
+    return publicKeys[0];
+  }
+
+  return key;
 }
 
 function normalizeAccountEmail(email) {
@@ -130,18 +170,22 @@ function resolveFinanceAccountKeys(accountKey) {
   const resolved = resolveAccountKey(accountKey);
   const targetEmail = normalizeAccountEmail(getAccountEmail(resolved));
   if (!targetEmail) {
-    return [resolved];
+    return resolved ? [resolved] : [];
   }
 
   const keys = new Set();
-  for (const key of listAccountKeys()) {
+  for (const key of listPublicAccountKeys()) {
     const email = normalizeAccountEmail(getAccountEmail(key));
     if (email === targetEmail) {
       keys.add(key);
     }
   }
 
-  return keys.size > 0 ? [...keys] : [resolved];
+  if (keys.size > 0) {
+    return [...keys];
+  }
+
+  return resolved ? [resolved] : [];
 }
 
 module.exports = {
@@ -150,6 +194,8 @@ module.exports = {
   getAccount,
   listAccounts,
   listAccountKeys,
+  listPublicAccountKeys,
   resolveAccountKey,
   resolveFinanceAccountKeys,
+  shouldExposeBuiltinAccounts,
 };

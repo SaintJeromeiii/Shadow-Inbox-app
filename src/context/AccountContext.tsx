@@ -29,6 +29,7 @@ import type { AccountKey, AccountProfile } from '../types/account';
 
 const STORAGE_KEY = '@shadow_inbox/active_account';
 const DEV_FALLBACK_EMAIL = 'jleonandersonjr@gmail.com';
+const DEFAULT_ACCOUNT_KEY = BUILTIN_ACCOUNT_PROFILES[0]?.key ?? '';
 
 function filterVisibleAccounts(
   accounts: AccountProfile[],
@@ -51,7 +52,7 @@ interface AccountContextValue {
 const AccountContext = createContext<AccountContextValue | null>(null);
 
 export function AccountProvider({ children }: { children: ReactNode }) {
-  const [activeAccount, setActiveAccountState] = useState<AccountKey>('personal');
+  const [activeAccount, setActiveAccountState] = useState<AccountKey>(DEFAULT_ACCOUNT_KEY);
   const [accounts, setAccounts] = useState<AccountProfile[]>(BUILTIN_ACCOUNT_PROFILES);
   const [ready, setReady] = useState(false);
 
@@ -112,7 +113,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
         savedAccountKey ??
         devFallbackAccountKey ??
         visible[0]?.key ??
-        'personal';
+        DEFAULT_ACCOUNT_KEY;
 
       if (__DEV__ && !accountKeyForEmail(visible, DEV_FALLBACK_EMAIL)) {
         console.warn(
@@ -137,7 +138,11 @@ export function AccountProvider({ children }: { children: ReactNode }) {
       const resolvedKey = preferOAuthAccountKey(accounts, accountKey);
       setActiveAccountState(resolvedKey);
       setActiveAccountKey(resolvedKey);
-      await AsyncStorage.setItem(STORAGE_KEY, resolvedKey);
+      if (resolvedKey) {
+        await AsyncStorage.setItem(STORAGE_KEY, resolvedKey);
+      } else {
+        await AsyncStorage.removeItem(STORAGE_KEY);
+      }
     },
     [accounts],
   );

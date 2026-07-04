@@ -12,8 +12,9 @@ const RELAY_URL =
   Constants.expoConfig?.extra?.emailRelayUrl ??
   'https://shadow-inbox-production.up.railway.app';
 const REQUEST_TIMEOUT_MS = 15_000;
+const GMAIL_ACTION_TIMEOUT_MS = 45_000;
 
-let activeAccountKey: AccountKey = 'personal';
+let activeAccountKey: AccountKey = '';
 let activeCharacterId: CharacterId = DEFAULT_CHARACTER_ID;
 
 export function setActiveAccountKey(accountKey: AccountKey): void {
@@ -35,7 +36,7 @@ export function getActiveCharacterId(): CharacterId {
 export function relayHeaders(extra?: HeadersInit): HeadersInit {
   return {
     'Content-Type': 'application/json',
-    'X-Account-Key': activeAccountKey,
+    ...(activeAccountKey ? { 'X-Account-Key': activeAccountKey } : {}),
     'X-Character-Id': activeCharacterId,
     ...extra,
   };
@@ -215,7 +216,7 @@ async function postGmailAction(
         headers: relayHeaders(),
         body: JSON.stringify({ ids }),
       },
-      REQUEST_TIMEOUT_MS,
+      GMAIL_ACTION_TIMEOUT_MS,
     );
 
     if (!response.ok) {

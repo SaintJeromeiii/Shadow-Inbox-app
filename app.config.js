@@ -50,7 +50,8 @@ module.exports = {
     },
     android: {
       package: 'com.saintjeromeiii.shadowinbox',
-      googleServicesFile: './google-services.json',
+      googleServicesFile:
+        process.env.GOOGLE_SERVICES_JSON ?? './google-services.json',
       usesCleartextTraffic: true,
       adaptiveIcon: {
         backgroundColor: '#E6F4FE',

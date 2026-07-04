@@ -48,6 +48,7 @@ export default function IntelDeckScreen({
   isScreenFocused = true,
 }: IntelDeckScreenProps) {
   const { activeAccount, setActiveAccount } = useAccount();
+  const hasActiveAccount = Boolean(activeAccount);
   const [briefing, setBriefing] = useState<DailyBriefing | null>(null);
   const [briefingLoading, setBriefingLoading] = useState(false);
   const [briefingError, setBriefingError] = useState<string | null>(null);
@@ -162,13 +163,13 @@ export default function IntelDeckScreen({
   }, [activeAccount, financeSummary]);
 
   useEffect(() => {
-    if (!isScreenFocused) {
+    if (!isScreenFocused || !hasActiveAccount) {
       return;
     }
     void refreshBriefing();
     void loadTasks();
     void loadFinances();
-  }, [isScreenFocused, refreshBriefing, loadTasks, loadFinances]);
+  }, [hasActiveAccount, isScreenFocused, refreshBriefing, loadTasks, loadFinances]);
 
   const handleToggleTask = useCallback(async (task: ExtractedTask) => {
     try {

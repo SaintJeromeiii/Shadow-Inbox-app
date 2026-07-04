@@ -130,7 +130,7 @@ export default function SettingsScreen({
               await hideAccountOnDevice(oauthAccount.key);
               const remaining = await refreshAccounts();
               if (activeAccount === oauthAccount.key) {
-                await setActiveAccount(remaining[0]?.key ?? 'personal');
+                await setActiveAccount(remaining[0]?.key ?? '');
               }
               Alert.alert('Disconnected', 'Gmail was removed from this device.');
             })();

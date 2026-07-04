@@ -1,6 +1,6 @@
 import type { AccountKey, AccountProfile } from '../types/account';
 
-export const BUILTIN_ACCOUNT_PROFILES: AccountProfile[] = [
+const DEV_BUILTIN_ACCOUNT_PROFILES: AccountProfile[] = [
   {
     key: 'personal',
     label: 'Personal Account',
@@ -18,6 +18,19 @@ export const BUILTIN_ACCOUNT_PROFILES: AccountProfile[] = [
   },
 ];
 
+export const BUILTIN_ACCOUNT_PROFILES: AccountProfile[] = __DEV__
+  ? DEV_BUILTIN_ACCOUNT_PROFILES
+  : [];
+
+export const EMPTY_ACCOUNT_PROFILE: AccountProfile = {
+  key: '',
+  label: 'Link Gmail',
+  email: '',
+  initials: '--',
+  accentColor: '#5B8DEF',
+  mockOnly: true,
+};
+
 export function findAccountProfile(
   key: AccountKey,
   accounts: AccountProfile[],
@@ -25,7 +38,9 @@ export function findAccountProfile(
   return (
     accounts.find((account) => account.key === key) ??
     BUILTIN_ACCOUNT_PROFILES.find((account) => account.key === key) ??
-    BUILTIN_ACCOUNT_PROFILES[0]
+    accounts[0] ??
+    BUILTIN_ACCOUNT_PROFILES[0] ??
+    EMPTY_ACCOUNT_PROFILE
   );
 }
 

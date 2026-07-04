@@ -1,10 +1,11 @@
 import type { RawNotification } from '../types/notification';
 import type { AccountKey } from '../types/account';
-import personalNotificationsData from '../data/account_personal_notifications.json';
+import mockNotificationsData from '../data/mockNotifications.json';
 import workNotificationsData from '../data/account_work_notifications.json';
 
 const BUNDLED_BY_ACCOUNT: Record<string, unknown> = {
-  personal: personalNotificationsData,
+  // Personal seed data stays out of git; ship safe bundled mocks instead.
+  personal: mockNotificationsData,
   work: workNotificationsData,
 };
 

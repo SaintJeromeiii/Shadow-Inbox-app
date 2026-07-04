@@ -16,6 +16,10 @@ export interface AiUsageSummary {
 }
 
 export async function fetchAiUsage(): Promise<AiUsageSummary | null> {
+  if (!relayHeaders()['X-Account-Key']) {
+    return null;
+  }
+
   try {
     const response = await relayFetch('/api/user/ai-usage', {
       method: 'GET',

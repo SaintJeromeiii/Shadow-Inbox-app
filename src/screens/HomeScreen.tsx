@@ -197,6 +197,7 @@ export default function HomeScreen({
   const dataSource = getNotificationDataSource(activeAccount);
   const triageMode = getTriageMode();
   const isLiveAi = triageMode === 'live';
+  const hasActiveAccount = Boolean(activeAccount);
 
   const lastCheckedLabel = useMemo(
     () => formatLastChecked(lastUpdated),
@@ -235,7 +236,12 @@ export default function HomeScreen({
   useEffect(() => {
     let cancelled = false;
 
-    if (!isScreenFocused) {
+    if (!isScreenFocused || !hasActiveAccount) {
+      if (!hasActiveAccount) {
+        const fallback = buildPlayerStats(0);
+        playerStatsRef.current = fallback;
+        setPlayerStats(fallback);
+      }
       return () => {
         cancelled = true;
       };
@@ -267,7 +273,7 @@ export default function HomeScreen({
     return () => {
       cancelled = true;
     };
-  }, [activeAccount, characterId, isScreenFocused]);
+  }, [activeAccount, characterId, hasActiveAccount, isScreenFocused]);
 
   useEffect(() => {
     stopAllCharacterIntroAmbience();
@@ -319,6 +325,11 @@ export default function HomeScreen({
     let cancelled = false;
 
     async function setupNotifications() {
+      if (!hasActiveAccount) {
+        setNotificationsEnabled(false);
+        return;
+      }
+
       const registration = await registerForPushNotificationsAsync();
       if (cancelled) return;
 
@@ -335,7 +346,7 @@ export default function HomeScreen({
     return () => {
       cancelled = true;
     };
-  }, [activeAccount]);
+  }, [activeAccount, hasActiveAccount]);
 
   useEffect(() => {
     if (!isScreenFocused || !hydrated || !notificationsEnabled) return;
@@ -382,6 +393,14 @@ export default function HomeScreen({
 
   const fetchRelayInboxSeed = useCallback(
     async (accountKey: AccountKey, sync: boolean): Promise<InboxFetchResult> => {
+      if (!accountKey) {
+        return {
+          accountKey,
+          notifications: [],
+          synced: sync,
+        };
+      }
+
       const fallback = getSeedNotifications(accountKey);
 
       try {
@@ -503,6 +522,12 @@ export default function HomeScreen({
       };
 
       try {
+        if (!accountKey) {
+          setSyncError(null);
+          setSyncSummary(null);
+          return publishInbox([]);
+        }
+
         const cachedRemote = await fetchRelayInboxSeed(accountKey, false);
         const cachedSeed =
           cachedRemote.notifications.length > 0
@@ -543,7 +568,7 @@ export default function HomeScreen({
   );
 
   useEffect(() => {
-    if (!accountReady || !isScreenFocused) return;
+    if (!accountReady || !isScreenFocused || !hasActiveAccount) return;
 
     const subscription = AppState.addEventListener('change', (nextState) => {
       if (nextState !== 'active' || foregroundSyncRef.current) {
@@ -569,10 +594,18 @@ export default function HomeScreen({
     return () => {
       subscription.remove();
     };
-  }, [accountReady, activeAccount, applyInboxReload, isScreenFocused]);
+  }, [accountReady, activeAccount, applyInboxReload, hasActiveAccount, isScreenFocused]);
 
   useEffect(() => {
     if (!accountReady || !isScreenFocused) return;
+
+    if (!hasActiveAccount) {
+      setNotifications([]);
+      setDraftTexts({});
+      setHydrated(true);
+      setRefreshing(false);
+      return;
+    }
 
     let cancelled = false;
     setRefreshing(true);
@@ -586,7 +619,7 @@ export default function HomeScreen({
     return () => {
       cancelled = true;
     };
-  }, [accountReady, activeAccount, applyInboxReload, isScreenFocused]);
+  }, [accountReady, activeAccount, applyInboxReload, hasActiveAccount, isScreenFocused]);
 
   useEffect(() => {
     onNotificationsChange?.(notifications);
@@ -600,7 +633,7 @@ export default function HomeScreen({
   }, [externalFocusEmailId, onFocusEmailHandled]);
 
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || !activeAccount) return;
 
     if (skipNextSave.current) {
       skipNextSave.current = false;
@@ -611,6 +644,9 @@ export default function HomeScreen({
   }, [notifications, hydrated, activeAccount]);
 
   const onRefresh = useCallback(async () => {
+    if (!activeAccount) {
+      return;
+    }
     setRefreshing(true);
     setAvatarReplayToken((token) => token + 1);
     try {
@@ -1322,6 +1358,8 @@ export default function HomeScreen({
 
     if (processing) {
       subtitle = 'AI is sorting your inbox…';
+    } else if (!hasActiveAccount) {
+      subtitle = 'Connect Gmail in Settings to load your real inbox.';
     } else if (syncError) {
       subtitle = syncError;
     } else if (unreadCount > 0) {
