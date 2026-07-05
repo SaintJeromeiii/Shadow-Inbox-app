@@ -22,7 +22,7 @@ export const PLAYER_TIER_NAMES: Record<PlayerTier, string> = {
 
 export const PLAYER_TIER_THRESHOLDS: Record<PlayerTier, number> = {
   1: 0,
-  2: 26,
-  3: 101,
-  4: 251,
+  2: 50,
+  3: 225,
+  4: 650,
 };

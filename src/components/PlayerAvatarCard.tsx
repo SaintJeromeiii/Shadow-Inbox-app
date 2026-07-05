@@ -3,7 +3,7 @@ import type { PlayerStats } from '../types/userProgress';
 import DynamicAvatar from './DynamicAvatar';
 import { useCharacter } from '../context/CharacterContext';
 import { getCharacterVisualTierAssets } from '../constants/characters';
-import { getVisualTierFromInboxCount } from '../utils/visualTier';
+import { getVisualTierFromPlayerTier } from '../utils/visualTier';
 import {
   arcadeColors,
   arcadePanel,
@@ -12,7 +12,6 @@ import {
 
 interface PlayerAvatarCardProps {
   stats: PlayerStats;
-  inboxCount?: number;
   enableIntro?: boolean;
   enableIntroAudio?: boolean;
   replayToken?: number;
@@ -21,7 +20,6 @@ interface PlayerAvatarCardProps {
 
 export default function PlayerAvatarCard({
   stats,
-  inboxCount = 0,
   enableIntro = false,
   enableIntroAudio = false,
   replayToken = 0,
@@ -33,7 +31,7 @@ export default function PlayerAvatarCard({
     ? 'MAX TIER UNLOCKED'
     : `${stats.deletesToNext} clears to ${stats.nextTierName?.toUpperCase() ?? 'NEXT TIER'}`;
 
-  const visualTier = getVisualTierFromInboxCount(inboxCount, character.maxVisualTier);
+  const visualTier = getVisualTierFromPlayerTier(stats.tier, character.maxVisualTier);
   const visualArmorLabel = getCharacterVisualTierAssets(characterId, visualTier).label;
 
   return (
@@ -51,7 +49,7 @@ export default function PlayerAvatarCard({
 
         <View style={styles.avatarFrame}>
           <DynamicAvatar
-            inboxCount={inboxCount}
+            visualTier={visualTier}
             enableIntro={enableIntro}
             enableIntroAudio={enableIntroAudio}
             replayToken={replayToken}

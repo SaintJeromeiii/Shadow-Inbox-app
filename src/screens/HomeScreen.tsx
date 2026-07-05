@@ -284,6 +284,7 @@ export default function HomeScreen({
       const previous = playerStatsRef.current;
       if (previous && didLevelUp(previous.totalDeletions, nextStats.totalDeletions)) {
         triggerLevelUp(nextStats.tierName);
+        setAvatarReplayToken((token) => token + 1);
       }
       playerStatsRef.current = nextStats;
       setPlayerStats(nextStats);
@@ -304,6 +305,7 @@ export default function HomeScreen({
         const next = applyDeletionLocally(playerStatsRef.current, count);
         if (next.leveledUp) {
           triggerLevelUp(next.tierName);
+          setAvatarReplayToken((token) => token + 1);
         }
         playerStatsRef.current = next;
         setPlayerStats(next);
@@ -901,7 +903,6 @@ export default function HomeScreen({
         {playerStats ? (
           <PlayerAvatarCard
             stats={playerStats}
-            inboxCount={activeFolderCount}
             enableIntro={showFighterIntro}
             replayToken={avatarReplayToken}
             onIntroComplete={handleFighterIntroComplete}

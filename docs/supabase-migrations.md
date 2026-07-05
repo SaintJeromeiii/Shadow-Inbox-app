@@ -5,10 +5,11 @@ Run these in the **Supabase SQL Editor** with **RLS disabled** for the migration
 ## Order
 
 1. `backend/db/schema.sql` — base tables (if fresh project)
-2. `backend/db/migrations/004_user_profiles.sql`
-3. `backend/db/migrations/005_triage_usage_and_streaks.sql`
-4. `backend/db/migrations/006_ai_daily_usage.sql`
-5. `backend/db/migrations/007_waitlist_signups.sql`
+2. `backend/db/migrations/003_oauth_accounts.sql` — **required for Gmail sign-in**
+3. `backend/db/migrations/004_user_profiles.sql`
+4. `backend/db/migrations/005_triage_usage_and_streaks.sql`
+5. `backend/db/migrations/006_ai_daily_usage.sql`
+6. `backend/db/migrations/007_waitlist_signups.sql`
 
 ## Railway env vars
 

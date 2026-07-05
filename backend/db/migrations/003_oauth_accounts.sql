@@ -9,3 +9,5 @@ create table if not exists public.oauth_accounts (
 
 create index if not exists idx_oauth_accounts_email
   on public.oauth_accounts (email);
+
+alter table public.oauth_accounts disable row level security;

@@ -8,9 +8,9 @@ const PROGRESS_PATH = path.join(__dirname, 'data', 'user_progress.json');
 
 const PLAYER_TIERS = [
   { tier: 1, name: 'Street Civilian', minDeletions: 0 },
-  { tier: 2, name: 'Cyber Soldier', minDeletions: 26 },
-  { tier: 3, name: 'Neon Commando', minDeletions: 101 },
-  { tier: 4, name: 'Shadow Realm Deity', minDeletions: 251 },
+  { tier: 2, name: 'Cyber Soldier', minDeletions: 50 },
+  { tier: 3, name: 'Neon Commando', minDeletions: 225 },
+  { tier: 4, name: 'Shadow Realm Deity', minDeletions: 650 },
 ];
 
 function progressStoreKey(accountKey, characterId) {

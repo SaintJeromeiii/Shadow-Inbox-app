@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, AppState, Platform } from 'react-native';
+import { Alert, Platform } from 'react-native';
 import {
   GoogleSignin,
   isErrorWithCode,
@@ -31,21 +31,6 @@ function isRelayNetworkError(message: string): boolean {
   return /cannot reach the backend|network request failed|timed out|failed to fetch/i.test(
     message,
   );
-}
-
-function waitForAppActive(): Promise<void> {
-  if (AppState.currentState === 'active') {
-    return Promise.resolve();
-  }
-
-  return new Promise((resolve) => {
-    const subscription = AppState.addEventListener('change', (nextState) => {
-      if (nextState === 'active') {
-        subscription.remove();
-        resolve();
-      }
-    });
-  });
 }
 
 async function exchangeAuthCodeWithRetry(input: {
@@ -157,9 +142,7 @@ export function useGoogleSignIn(options: UseGoogleSignInOptions = {}) {
         return;
       }
 
-      await waitForAppActive();
-      await new Promise((resolve) => setTimeout(resolve, 400));
-
+      // Exchange immediately — server auth codes expire within seconds.
       const result = await exchangeAuthCodeWithRetry({
         code: serverAuthCode,
         clientId: webClientId,
@@ -168,9 +151,11 @@ export function useGoogleSignIn(options: UseGoogleSignInOptions = {}) {
 
       if (!result.success || !result.account) {
         const relayError = result.error ?? 'Could not complete account linking on the relay.';
-        const hint = /invalid_grant|expired|revoked/i.test(relayError)
-          ? '\n\nTry again in a few seconds. If this keeps happening, confirm GOOGLE_CLIENT_SECRET on Railway matches your Web OAuth client.'
-          : '';
+        const hint = /bad request|invalid_grant|expired|revoked/i.test(relayError)
+          ? '\n\nThe auth code may have expired. Revoke Shadow Inbox at myaccount.google.com/permissions, then sign in once without retrying.'
+          : /invalid client secret/i.test(relayError)
+            ? '\n\nConfirm Railway GOOGLE_CLIENT_SECRET matches the Web OAuth client baked into this build.'
+            : '';
         Alert.alert('Google Sign-In Failed', `${relayError}${hint}`);
         return;
       }
