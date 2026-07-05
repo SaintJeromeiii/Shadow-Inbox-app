@@ -50,7 +50,6 @@ export async function removeRelayAccount(
 ): Promise<{ success: boolean; accounts?: AccountProfile[]; error?: string }> {
   const response = await relayFetch('/api/accounts/remove', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ accountKey }),
   });
 
@@ -87,7 +86,6 @@ export async function exchangeGoogleAuthCode(input: {
       '/api/auth/google/callback',
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(input),
       },
       OAUTH_TIMEOUT_MS,

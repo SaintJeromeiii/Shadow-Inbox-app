@@ -6,7 +6,7 @@ const ACCOUNT_DEFINITIONS = {
   personal: {
     key: 'personal',
     label: 'Personal Account',
-    email: process.env.IMAP_USER || 'jleonandersonjr@gmail.com',
+    email: process.env.IMAP_USER || '',
     initials: 'JA',
     accentColor: '#5B8DEF',
     feedFile: 'account_personal_notifications.json',

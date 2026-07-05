@@ -2,7 +2,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { AccountProfile } from '../types/account';
 
 const HIDDEN_ACCOUNTS_KEY = '@shadow_inbox/hidden_accounts';
-const LINKED_ACCOUNTS_CACHE_KEY = '@shadow_inbox/linked_accounts_cache';
+const LINKED_ACCOUNTS_CACHE_KEY = '@shadow_inbox/linked_accounts_cache_v2';
+const LEGACY_LINKED_ACCOUNTS_CACHE_KEY = '@shadow_inbox/linked_accounts_cache';
 
 export async function getHiddenAccountKeys(): Promise<Set<string>> {
   const raw = await AsyncStorage.getItem(HIDDEN_ACCOUNTS_KEY);
@@ -31,6 +32,7 @@ export async function unhideAccountOnDevice(accountKey: string): Promise<void> {
 export async function cacheLinkedAccounts(accounts: AccountProfile[]): Promise<void> {
   const oauthAccounts = accounts.filter((account) => account.oauth);
   if (oauthAccounts.length === 0) {
+    await clearCachedLinkedAccounts();
     return;
   }
 
@@ -54,13 +56,18 @@ export async function clearCachedLinkedAccounts(): Promise<void> {
 }
 
 /**
- * Merge relay accounts with the last known OAuth profiles so a Metro reload
- * still shows linked Google inboxes when the relay is briefly unreachable.
+ * Merge relay accounts with cached OAuth profiles only when the relay is unreachable.
+ * When the relay responds, trust only device-bound accounts from the server.
  */
 export function mergeAccountsWithCache(
   remoteAccounts: AccountProfile[],
   cachedOAuthAccounts: AccountProfile[],
+  options?: { remoteSuccess?: boolean },
 ): AccountProfile[] {
+  if (options?.remoteSuccess) {
+    return remoteAccounts;
+  }
+
   if (cachedOAuthAccounts.length === 0) {
     return remoteAccounts;
   }
@@ -77,4 +84,8 @@ export function mergeAccountsWithCache(
   }
 
   return [...merged.values()];
+}
+
+export async function clearLegacyLinkedAccountCache(): Promise<void> {
+  await AsyncStorage.removeItem(LEGACY_LINKED_ACCOUNTS_CACHE_KEY);
 }

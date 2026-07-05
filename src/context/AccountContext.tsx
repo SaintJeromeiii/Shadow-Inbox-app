@@ -15,6 +15,7 @@ import {
 import { fetchRelayAccounts } from '../services/authService';
 import {
   cacheLinkedAccounts,
+  clearLegacyLinkedAccountCache,
   getHiddenAccountKeys,
   mergeAccountsWithCache,
   readCachedLinkedAccounts,
@@ -64,7 +65,9 @@ export function AccountProvider({ children }: { children: ReactNode }) {
 
     try {
       const remoteAccounts = await fetchRelayAccounts();
-      const merged = mergeAccountsWithCache(remoteAccounts, cachedOAuth);
+      const merged = mergeAccountsWithCache(remoteAccounts, cachedOAuth, {
+        remoteSuccess: true,
+      });
       const visible = filterVisibleAccounts(merged, hidden);
 
       if (visible.length > 0) {
@@ -72,12 +75,18 @@ export function AccountProvider({ children }: { children: ReactNode }) {
         await cacheLinkedAccounts(visible);
         return visible;
       }
+
+      setAccounts(visible);
+      if (visible.length === 0) {
+        await cacheLinkedAccounts([]);
+      }
+      return visible;
     } catch (error) {
       console.warn('[Shadow Inbox] Could not load accounts from relay:', error);
     }
 
     const fallback = filterVisibleAccounts(
-      mergeAccountsWithCache(BUILTIN_ACCOUNT_PROFILES, cachedOAuth),
+      mergeAccountsWithCache([], cachedOAuth, { remoteSuccess: false }),
       hidden,
     );
     setAccounts(fallback);
@@ -88,6 +97,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
 
     async function hydrateAccount() {
+      await clearLegacyLinkedAccountCache();
       const saved = await AsyncStorage.getItem(STORAGE_KEY);
       let visible: AccountProfile[];
 

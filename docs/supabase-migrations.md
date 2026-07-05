@@ -10,6 +10,7 @@ Run these in the **Supabase SQL Editor** with **RLS disabled** for the migration
 4. `backend/db/migrations/005_triage_usage_and_streaks.sql`
 5. `backend/db/migrations/006_ai_daily_usage.sql`
 6. `backend/db/migrations/007_waitlist_signups.sql`
+7. `backend/db/migrations/008_device_account_links.sql` — **required for per-device Gmail isolation**
 
 ## Railway env vars
 

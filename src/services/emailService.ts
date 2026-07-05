@@ -6,6 +6,7 @@ import type { PlayerStats } from '../types/userProgress';
 import type { CharacterId } from '../types/character';
 import { DEFAULT_CHARACTER_ID } from '../constants/characters';
 import { throwIfAiQuotaExceeded } from '../utils/relayErrors';
+import { getCachedDeviceInstallId } from './deviceInstallId';
 
 const RELAY_URL =
   process.env.EXPO_PUBLIC_EMAIL_RELAY_URL ??
@@ -34,9 +35,11 @@ export function getActiveCharacterId(): CharacterId {
 }
 
 export function relayHeaders(extra?: HeadersInit): HeadersInit {
+  const deviceId = getCachedDeviceInstallId();
   return {
     'Content-Type': 'application/json',
     ...(activeAccountKey ? { 'X-Account-Key': activeAccountKey } : {}),
+    ...(deviceId ? { 'X-Device-Id': deviceId } : {}),
     'X-Character-Id': activeCharacterId,
     ...extra,
   };
@@ -133,8 +136,17 @@ export async function relayFetch(
   options: RequestInit = {},
   timeoutMs = REQUEST_TIMEOUT_MS,
 ): Promise<Response> {
+  const mergedHeaders = {
+    ...relayHeaders(),
+    ...(options.headers ?? {}),
+  };
+
   try {
-    return await fetchWithTimeout(`${getRelayUrl()}${path}`, options, timeoutMs);
+    return await fetchWithTimeout(
+      `${getRelayUrl()}${path}`,
+      { ...options, headers: mergedHeaders },
+      timeoutMs,
+    );
   } catch (error) {
     throw new Error(formatRelayConnectionError(error));
   }

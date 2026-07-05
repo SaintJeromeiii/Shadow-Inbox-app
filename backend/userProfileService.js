@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { getSupabase } = require('./supabaseClient');
-const { resolveAccountKey } = require('./accounts');
+const { resolveAccountKey, shouldExposeBuiltinAccounts } = require('./accounts');
 const { loadKnowledgeBase } = require('./knowledgeBase');
 
 const PROFILE_STORE_PATH = path.join(__dirname, 'data', 'user_profiles.json');
@@ -165,14 +165,15 @@ async function getUserProfile(accountKey) {
     }
   }
 
-  if (resolved === 'personal') {
+  if (resolved === 'personal' && shouldExposeBuiltinAccounts()) {
     const legacyKnowledge = loadKnowledgeBase();
-    if (legacyKnowledge) {
+    const operatorEmail = String(process.env.IMAP_USER || '').trim().toLowerCase();
+    if (legacyKnowledge && operatorEmail) {
       return normalizeProfile({
         ...DEFAULT_PROFILE,
-        displayName: 'Jerome',
-        email: 'jleonandersonjr@gmail.com',
-        roleTitle: 'Program analyst and resource manager',
+        displayName: String(process.env.OPERATOR_DISPLAY_NAME || 'Operator').trim(),
+        email: operatorEmail,
+        roleTitle: String(process.env.OPERATOR_ROLE_TITLE || DEFAULT_PROFILE.roleTitle).trim(),
         knowledgeText: legacyKnowledge,
         onboardingCompleted: true,
       });

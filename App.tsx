@@ -19,6 +19,7 @@ import { shouldEnterQuantumRealm } from './src/utils/characterTransition';
 import { PushNavigationProvider } from './src/context/PushNavigationContext';
 import { PushStatusProvider } from './src/context/PushStatusContext';
 import { configureNotificationHandler } from './src/services/pushNotifications';
+import { ensureDeviceInstallId } from './src/services/deviceInstallId';
 import { isOnboardingComplete, setOnboardingComplete } from './src/services/onboardingStorage';
 import { isArcadeGateComplete, setArcadeGateComplete } from './src/services/sessionStorage';
 import { fetchUserProfile } from './src/services/userProfileService';
@@ -40,6 +41,7 @@ function AppSession() {
     let cancelled = false;
 
     void (async () => {
+      await ensureDeviceInstallId();
       const [localComplete] = await Promise.all([isOnboardingComplete(), refreshTriageMode()]);
       let complete = localComplete;
 

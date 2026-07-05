@@ -24,6 +24,16 @@ const { getAccount, listAccounts, resolveAccountKey } = require('../backend/acco
 const { fetchNotifications } = require('./fetchNotifications');
 const { completeGoogleOAuth, getValidAccessToken } = require('../backend/googleOAuth');
 const { toPublicProfile, getOAuthAccount, removeOAuthAccount, hydrateOAuthTokenStore } = require('../backend/userTokens');
+const {
+  shouldEnforceDeviceAuth,
+  getDeviceIdFromRequest,
+  listAccountKeysForDevice,
+  listDevicesForAccount,
+  linkAccountToDevice,
+  unlinkAccountFromDevice,
+  hydrateDeviceLinks,
+} = require('../backend/deviceAuth');
+const { runWithRequestScope } = require('../backend/requestScope');
 const { ensureShadowLabelSet } = require('../backend/shadowLabels');
 const { applyShadowLabelsToNotification } = require('../backend/shadowLabels');
 const { writeNotifications } = require('../backend/notificationFeed');
@@ -146,6 +156,30 @@ app.post(
 );
 app.use(express.json({ limit: '1mb' }));
 
+function shouldBypassDeviceScope(req) {
+  const routePath = req.path || '';
+  return (
+    routePath === '/health' ||
+    routePath.startsWith('/docs') ||
+    routePath === '/api/auth/google/callback' ||
+    routePath.startsWith('/api/broadcast/webhooks/') ||
+    routePath === '/api/waitlist/signup'
+  );
+}
+
+function deviceScopeMiddleware(req, res, next) {
+  if (!shouldEnforceDeviceAuth() || shouldBypassDeviceScope(req)) {
+    return next();
+  }
+
+  const deviceId = getDeviceIdFromRequest(req);
+  const authorizedAccountKeys = listAccountKeysForDevice(deviceId);
+
+  return runWithRequestScope({ deviceId, authorizedAccountKeys }, () => next());
+}
+
+app.use(deviceScopeMiddleware);
+
 const { requireAdminAuth } = require('../backend/adminAuth');
 
 function mountApiRouters(expressApp) {
@@ -180,7 +214,7 @@ app.get('/health', (_req, res) => {
   });
 });
 
-app.get('/api/accounts', (_req, res) => {
+app.get('/api/accounts', (req, res) => {
   res.json({ accounts: listAccounts() });
 });
 
@@ -261,6 +295,7 @@ app.post('/api/tasks/:id/toggle', async (req, res) => {
 });
 
 function handleRemoveAccountRequest(req, res) {
+  const deviceId = getDeviceIdFromRequest(req);
   const accountKey = resolveAccountKey(
     req.params?.accountKey || req.body?.accountKey,
   );
@@ -273,6 +308,37 @@ function handleRemoveAccountRequest(req, res) {
   if (!getOAuthAccount(accountKey)) {
     res.status(400).json({
       error: 'Only linked Google accounts can be removed. Personal and work inboxes stay configured via .env.',
+    });
+    return;
+  }
+
+  if (shouldEnforceDeviceAuth()) {
+    if (!deviceId) {
+      res.status(401).json({ error: 'Missing device id for account removal.' });
+      return;
+    }
+
+    unlinkAccountFromDevice(deviceId, accountKey);
+    const remainingDevices = listDevicesForAccount(accountKey);
+
+    if (remainingDevices.length === 0) {
+      const removed = removeOAuthAccount(accountKey);
+      if (!removed) {
+        res.status(404).json({ error: `OAuth account not found: ${accountKey}` });
+        return;
+      }
+
+      console.log(`[Relay] Removed Google account ${removed.email} (${accountKey})`);
+    } else {
+      console.log(
+        `[Relay] Unlinked Google account ${accountKey} from device ${deviceId.slice(0, 8)}…`,
+      );
+    }
+
+    res.status(200).json({
+      success: true,
+      accountKey,
+      accounts: listAccounts(),
     });
     return;
   }
@@ -297,9 +363,17 @@ app.post('/api/accounts/remove', handleRemoveAccountRequest);
 
 app.post('/api/auth/google/callback', async (req, res) => {
   const { code, redirectUri, codeVerifier, clientId, clientType } = req.body ?? {};
+  const deviceId = getDeviceIdFromRequest(req);
 
   if (!code || typeof code !== 'string') {
     res.status(400).json({ error: 'Missing authorization "code".' });
+    return;
+  }
+
+  if (shouldEnforceDeviceAuth() && !deviceId) {
+    res.status(401).json({
+      error: 'Missing device id. Reinstall the app or clear app data, then try Google sign-in again.',
+    });
     return;
   }
 
@@ -321,6 +395,10 @@ app.post('/api/auth/google/callback', async (req, res) => {
       clientType: resolvedClientType,
     });
     const account = toPublicProfile(saved);
+
+    if (deviceId) {
+      linkAccountToDevice(deviceId, saved.accountKey);
+    }
 
     try {
       await fetchNotifications({ accountKey: saved.accountKey, silent: true });
@@ -739,6 +817,13 @@ function startServer(options = {}) {
   void hydrateOAuthTokenStore().catch((error) => {
     console.warn(
       '[Relay] OAuth token hydrate failed:',
+      error instanceof Error ? error.message : error,
+    );
+  });
+
+  void hydrateDeviceLinks().catch((error) => {
+    console.warn(
+      '[Relay] Device link hydrate failed:',
       error instanceof Error ? error.message : error,
     );
   });

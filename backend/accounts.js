@@ -1,6 +1,11 @@
 const path = require('path');
 const fs = require('fs');
 const { DATA_DIR, ACCOUNT_DEFINITIONS } = require('./accountsConstants');
+const { getRequestScope } = require('./requestScope');
+const {
+  shouldEnforceDeviceAuth,
+  listAccountKeysForDevice,
+} = require('./deviceAuth');
 const {
   getOAuthAccount,
   listOAuthAccountKeys,
@@ -103,13 +108,30 @@ function listAccountKeys() {
   return [...listBuiltinAccountKeys(), ...listOAuthAccountKeys()];
 }
 
-function listPublicAccountKeys() {
-  return shouldExposeBuiltinAccounts()
-    ? listAccountKeys()
-    : listOAuthAccountKeys();
+function getAuthorizedOAuthAccountKeys(options = {}) {
+  const scope = getRequestScope();
+  const deviceId = options.deviceId ?? scope?.deviceId ?? '';
+  const scopedKeys = options.authorizedAccountKeys ?? scope?.authorizedAccountKeys;
+
+  if (scopedKeys) {
+    return scopedKeys;
+  }
+
+  if (shouldEnforceDeviceAuth()) {
+    return listAccountKeysForDevice(deviceId);
+  }
+
+  return listOAuthAccountKeys();
 }
 
-function listAccounts() {
+function listPublicAccountKeys(options = {}) {
+  const oauthKeys = getAuthorizedOAuthAccountKeys(options);
+  return shouldExposeBuiltinAccounts()
+    ? [...listBuiltinAccountKeys(), ...oauthKeys]
+    : oauthKeys;
+}
+
+function listAccounts(options = {}) {
   const builtin = shouldExposeBuiltinAccounts()
     ? listBuiltinAccountKeys().map((key) => {
         const account = getAccount(key);
@@ -126,7 +148,7 @@ function listAccounts() {
       })
     : [];
 
-  const oauth = listOAuthAccountKeys()
+  const oauth = getAuthorizedOAuthAccountKeys(options)
     .map((key) => getOAuthAccount(key))
     .filter(Boolean)
     .map(toPublicProfile);
@@ -134,15 +156,12 @@ function listAccounts() {
   return [...builtin, ...oauth];
 }
 
-function resolveAccountKey(raw) {
+function resolveAccountKey(raw, options = {}) {
   const key = String(raw || 'personal').trim().toLowerCase();
-  const publicKeys = listPublicAccountKeys();
+  const publicKeys = listPublicAccountKeys(options);
+
   if (publicKeys.includes(key)) {
     return key;
-  }
-
-  if (ACCOUNT_DEFINITIONS[key] || getOAuthAccount(key)) {
-    return publicKeys[0] ?? (shouldExposeBuiltinAccounts() ? key : '');
   }
 
   if (!key || key === 'personal') {
@@ -153,7 +172,15 @@ function resolveAccountKey(raw) {
     return publicKeys[0];
   }
 
-  return key;
+  if (shouldEnforceDeviceAuth() && (ACCOUNT_DEFINITIONS[key] || getOAuthAccount(key))) {
+    return publicKeys[0] ?? '';
+  }
+
+  if (ACCOUNT_DEFINITIONS[key] || getOAuthAccount(key)) {
+    return publicKeys[0] ?? (shouldExposeBuiltinAccounts() ? key : '');
+  }
+
+  return publicKeys[0] ?? (shouldExposeBuiltinAccounts() ? key : '');
 }
 
 function normalizeAccountEmail(email) {
