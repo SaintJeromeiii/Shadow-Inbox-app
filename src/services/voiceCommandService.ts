@@ -1,5 +1,5 @@
 import type { AccountKey } from '../types/account';
-import { getActiveAccountKey, getRelayUrl } from './emailService';
+import { getActiveAccountKey, getRelayUrl, relayAuthHeaders } from './emailService';
 
 const VOICE_COMMAND_TIMEOUT_MS = 60_000;
 
@@ -48,9 +48,7 @@ export async function sendVoiceCommand(
   try {
     const response = await fetch(`${getRelayUrl()}/api/emails/voice-command`, {
       method: 'POST',
-      headers: {
-        'X-Account-Key': accountKey,
-      },
+      headers: relayAuthHeaders(accountKey),
       body: formData,
       signal: controller.signal,
     });

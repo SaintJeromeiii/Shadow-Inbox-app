@@ -13,6 +13,7 @@ import {
   findAccountProfile,
 } from '../constants/accounts';
 import { fetchRelayAccounts } from '../services/authService';
+import { ensureDeviceInstallId } from '../services/deviceInstallId';
 import {
   cacheLinkedAccounts,
   clearLegacyLinkedAccountCache,
@@ -97,6 +98,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
 
     async function hydrateAccount() {
+      await ensureDeviceInstallId();
       await clearLegacyLinkedAccountCache();
       const saved = await AsyncStorage.getItem(STORAGE_KEY);
       let visible: AccountProfile[];

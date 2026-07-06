@@ -1,6 +1,6 @@
 import type { RawNotification } from '../types/notification';
 import type { AccountKey } from '../types/account';
-import { getRelayUrl } from './emailService';
+import { getRelayUrl, relayHeaders } from './emailService';
 
 const REQUEST_TIMEOUT_MS = 20_000;
 const SYNC_REQUEST_TIMEOUT_MS = 65_000;
@@ -50,6 +50,7 @@ export async function fetchInboxFromRelay(
     {
       method: 'GET',
       headers: {
+        ...relayHeaders(),
         'X-Account-Key': accountKey,
       },
     },

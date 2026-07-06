@@ -34,6 +34,17 @@ export function getActiveCharacterId(): CharacterId {
   return activeCharacterId;
 }
 
+export function relayAuthHeaders(accountKey?: AccountKey): HeadersInit {
+  const deviceId = getCachedDeviceInstallId();
+  const resolvedAccountKey = accountKey ?? activeAccountKey;
+
+  return {
+    ...(resolvedAccountKey ? { 'X-Account-Key': resolvedAccountKey } : {}),
+    ...(deviceId ? { 'X-Device-Id': deviceId } : {}),
+    'X-Character-Id': activeCharacterId,
+  };
+}
+
 export function relayHeaders(extra?: HeadersInit): HeadersInit {
   const deviceId = getCachedDeviceInstallId();
   return {

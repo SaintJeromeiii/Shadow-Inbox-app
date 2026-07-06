@@ -1,7 +1,7 @@
 import type { AccountKey } from '../types/account';
 import type { FinanceSummary } from '../types/finance';
 import { fetchRelayAccounts } from './authService';
-import { getRelayUrl } from './emailService';
+import { getRelayUrl, relayHeaders } from './emailService';
 
 const REQUEST_TIMEOUT_MS = 15_000;
 
@@ -44,7 +44,10 @@ async function fetchFinanceSummaryForKey(
     `${getRelayUrl()}/api/finances/summary${query ? `?${query}` : ''}`,
     {
       method: 'GET',
-      headers: accountKey ? { 'X-Account-Key': accountKey } : undefined,
+      headers: {
+        ...relayHeaders(),
+        ...(accountKey ? { 'X-Account-Key': accountKey } : {}),
+      },
     },
     REQUEST_TIMEOUT_MS,
   );

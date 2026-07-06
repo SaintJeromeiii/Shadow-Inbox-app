@@ -3,7 +3,7 @@ import { throwIfAiQuotaExceeded } from '../utils/relayErrors';
 import type { AccountKey } from '../types/account';
 import type { DailyBriefing } from '../types/briefing';
 import type { TriagedNotification } from '../types/notification';
-import { getActiveAccountKey, getRelayUrl } from './emailService';
+import { getActiveAccountKey, getRelayUrl, relayHeaders } from './emailService';
 
 const REQUEST_TIMEOUT_MS = 50_000;
 const LATEST_TIMEOUT_MS = 12_000;
@@ -45,7 +45,10 @@ export async function fetchLatestBriefing(
     `${getRelayUrl()}/api/briefing/latest?${params.toString()}`,
     {
       method: 'GET',
-      headers: { 'X-Account-Key': accountKey },
+      headers: {
+        ...relayHeaders(),
+        'X-Account-Key': accountKey,
+      },
     },
     LATEST_TIMEOUT_MS,
   );
@@ -80,7 +83,7 @@ export async function generateDailyBriefing(
     {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
+        ...relayHeaders(),
         'X-Account-Key': accountKey,
       },
       body: JSON.stringify({ triageByAccount, accountKey }),

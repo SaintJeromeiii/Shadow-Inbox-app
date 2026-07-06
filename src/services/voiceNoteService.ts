@@ -1,5 +1,5 @@
 import type { AccountKey } from '../types/account';
-import { getActiveAccountKey, getRelayUrl } from './emailService';
+import { getActiveAccountKey, getRelayUrl, relayAuthHeaders } from './emailService';
 
 const VOICE_INGEST_TIMEOUT_MS = 90_000;
 
@@ -46,9 +46,7 @@ export async function ingestVoiceNote(
   try {
     const response = await fetch(`${getRelayUrl()}/api/voice/ingest`, {
       method: 'POST',
-      headers: {
-        'X-Account-Key': accountKey,
-      },
+      headers: relayAuthHeaders(accountKey),
       body: formData,
       signal: controller.signal,
     });

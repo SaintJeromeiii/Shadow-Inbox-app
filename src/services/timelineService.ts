@@ -1,6 +1,6 @@
 import type { AccountKey } from '../types/account';
 import type { TimelineResponse } from '../types/timeline';
-import { getActiveAccountKey, getRelayUrl } from './emailService';
+import { getActiveAccountKey, getRelayUrl, relayHeaders } from './emailService';
 
 const REQUEST_TIMEOUT_MS = 15_000;
 
@@ -32,7 +32,10 @@ export async function fetchTimeline(
     `${getRelayUrl()}/api/timeline?${params.toString()}`,
     {
       method: 'GET',
-      headers: { 'X-Account-Key': accountKey },
+      headers: {
+        ...relayHeaders(),
+        'X-Account-Key': accountKey,
+      },
     },
     REQUEST_TIMEOUT_MS,
   );

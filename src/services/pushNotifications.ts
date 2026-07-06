@@ -4,7 +4,7 @@ import * as Device from 'expo-device';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import type { TriagedNotification } from '../types/notification';
-import { getActiveAccountKey, getRelayUrl } from './emailService';
+import { getActiveAccountKey, getRelayUrl, relayHeaders } from './emailService';
 
 const ALERTED_IDS_KEY = '@shadow_inbox/alerted_action_ids';
 const PUSH_TOKEN_KEY = '@shadow_inbox/expo_push_token';
@@ -194,7 +194,7 @@ export async function registerDeviceWithRelay(
     const response = await fetch(`${getRelayUrl()}/api/notifications/register-token`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
+        ...relayHeaders(),
         'X-Account-Key': resolvedAccountKey,
       },
       body: JSON.stringify({
@@ -222,7 +222,7 @@ export async function unregisterDeviceFromRelay(pushToken: string): Promise<void
   try {
     await fetch(`${getRelayUrl()}/api/notifications/unregister-token`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: relayHeaders(),
       body: JSON.stringify({ pushToken }),
     });
   } catch (error) {

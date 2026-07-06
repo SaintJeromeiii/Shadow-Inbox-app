@@ -1,6 +1,6 @@
 import type { AccountKey } from '../types/account';
 import type { ExtractedTask } from '../types/task';
-import { getRelayUrl } from './emailService';
+import { getRelayUrl, relayHeaders } from './emailService';
 
 const REQUEST_TIMEOUT_MS = 15_000;
 
@@ -33,7 +33,7 @@ export async function fetchExtractedTasks(
   const query = params.toString();
   const response = await fetchWithTimeout(
     `${getRelayUrl()}/api/tasks${query ? `?${query}` : ''}`,
-    { method: 'GET' },
+    { method: 'GET', headers: relayHeaders() },
     REQUEST_TIMEOUT_MS,
   );
 
@@ -64,7 +64,7 @@ export async function toggleExtractedTask(
     `${getRelayUrl()}/api/tasks/${encodeURIComponent(taskId)}/toggle`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: relayHeaders(),
       body: JSON.stringify({
         archiveSource: options?.archiveSource !== false,
       }),
