@@ -26,6 +26,12 @@ import { getRelayUrl } from '../services/emailService';
 import { fetchUserProfile, saveUserProfile } from '../services/userProfileService';
 import { setOnboardingComplete } from '../services/onboardingStorage';
 import { setArcadeGateComplete } from '../services/sessionStorage';
+import {
+  loadInboxSwipeSettings,
+  saveInboxSwipeSettings,
+  type InboxSwipeAction,
+  type InboxSwipeSettings,
+} from '../services/inboxSwipeStorage';
 import { refreshTriageMode, getTriageMode } from '../services/triageService';
 import { fetchAiUsage, type AiUsageSummary } from '../services/aiUsageService';
 import type { UserProfile } from '../types/userProfile';
@@ -55,6 +61,14 @@ export default function SettingsScreen({
   const [privacyVisible, setPrivacyVisible] = useState(false);
   const [triageMode, setTriageMode] = useState(getTriageMode());
   const [aiUsage, setAiUsage] = useState<AiUsageSummary | null>(null);
+  const [inboxSwipeSettings, setInboxSwipeSettings] = useState<InboxSwipeSettings>({
+    swipeLeft: 'trash',
+    swipeRight: 'archive',
+  });
+
+  const loadSwipeSettings = useCallback(async () => {
+    setInboxSwipeSettings(await loadInboxSwipeSettings());
+  }, []);
 
   const loadProfile = useCallback(async () => {
     setLoading(true);
@@ -76,7 +90,18 @@ export default function SettingsScreen({
   useEffect(() => {
     if (!visible) return;
     void loadProfile();
-  }, [visible, loadProfile]);
+    void loadSwipeSettings();
+  }, [visible, loadProfile, loadSwipeSettings]);
+
+  const handleSwipeActionChange = async (
+    direction: 'swipeLeft' | 'swipeRight',
+    action: InboxSwipeAction,
+  ) => {
+    const next = { ...inboxSwipeSettings, [direction]: action };
+    setInboxSwipeSettings(next);
+    await saveInboxSwipeSettings(next);
+    await Haptics.selectionAsync();
+  };
 
   const { signInWithGoogle, signOutFromGoogle, isSigningIn, isGoogleConfigured } =
     useGoogleSignIn({
@@ -259,6 +284,59 @@ export default function SettingsScreen({
           </View>
 
           <View style={styles.card}>
+            <Text style={styles.cardTitle}>INBOX SWIPES</Text>
+            <Text style={styles.metaText}>
+              Swipe cards in the feed like Gmail. Expanded cards and selection mode disable swipes.
+            </Text>
+
+            <Text style={styles.fieldLabel}>SWIPE LEFT</Text>
+            <View style={styles.segmentRow}>
+              {(['trash', 'archive'] as InboxSwipeAction[]).map((action) => (
+                <Pressable
+                  key={`left-${action}`}
+                  style={[
+                    styles.segmentButton,
+                    inboxSwipeSettings.swipeLeft === action && styles.segmentButtonActive,
+                  ]}
+                  onPress={() => void handleSwipeActionChange('swipeLeft', action)}
+                >
+                  <Text
+                    style={[
+                      styles.segmentButtonText,
+                      inboxSwipeSettings.swipeLeft === action && styles.segmentButtonTextActive,
+                    ]}
+                  >
+                    {action === 'trash' ? 'TRASH' : 'ARCHIVE'}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <Text style={styles.fieldLabel}>SWIPE RIGHT</Text>
+            <View style={styles.segmentRow}>
+              {(['archive', 'trash'] as InboxSwipeAction[]).map((action) => (
+                <Pressable
+                  key={`right-${action}`}
+                  style={[
+                    styles.segmentButton,
+                    inboxSwipeSettings.swipeRight === action && styles.segmentButtonActive,
+                  ]}
+                  onPress={() => void handleSwipeActionChange('swipeRight', action)}
+                >
+                  <Text
+                    style={[
+                      styles.segmentButtonText,
+                      inboxSwipeSettings.swipeRight === action && styles.segmentButtonTextActive,
+                    ]}
+                  >
+                    {action === 'trash' ? 'TRASH' : 'ARCHIVE'}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+
+          <View style={styles.card}>
             <Text style={styles.cardTitle}>GMAIL</Text>
             {isGoogleConfigured ? (
               <Pressable style={styles.secondaryButton} onPress={() => void signInWithGoogle()}>
@@ -398,6 +476,32 @@ const styles = StyleSheet.create({
   usageHeading: {
     marginTop: 8,
     color: arcadeColors.neonCyan,
+  },
+  segmentRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  segmentButton: {
+    flex: 1,
+    borderWidth: 2,
+    borderColor: arcadeColors.borderCyan,
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+    backgroundColor: arcadeColors.bgPanel,
+  },
+  segmentButtonActive: {
+    borderColor: arcadeColors.neonPink,
+    backgroundColor: 'rgba(255, 102, 204, 0.18)',
+  },
+  segmentButtonText: {
+    fontFamily: arcadeFonts.pixel,
+    fontSize: 7,
+    lineHeight: 11,
+    color: arcadeColors.textDim,
+  },
+  segmentButtonTextActive: {
+    color: arcadeColors.neonPink,
   },
   primaryButton: {
     marginTop: 8,

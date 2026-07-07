@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import FeedCard from '../components/FeedCard';
+import SwipeableFeedCard from '../components/SwipeableFeedCard';
 import {
   triageNotifications,
   getTriageMode,
@@ -46,6 +46,10 @@ import { useGoogleSignIn } from '../hooks/useGoogleSignIn';
 import { useFeedVoiceRecording } from '../hooks/useFeedVoiceRecording';
 import { removeRelayAccount } from '../services/authService';
 import { hideAccountOnDevice, unhideAccountOnDevice } from '../services/accountStorage';
+import {
+  loadInboxSwipeSettings,
+  type InboxSwipeSettings,
+} from '../services/inboxSwipeStorage';
 import type { AccountKey } from '../types/account';
 import type { AccountProfile } from '../types/account';
 import type { FeedTab, TriagedNotification, RawNotification } from '../types/notification';
@@ -197,6 +201,10 @@ export default function HomeScreen({
   const [syncSummary, setSyncSummary] = useState<string | null>(null);
   const [pushBannerDismissed, setPushBannerDismissed] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [inboxSwipeSettings, setInboxSwipeSettings] = useState<InboxSwipeSettings>({
+    swipeLeft: 'trash',
+    swipeRight: 'archive',
+  });
   const [quickFilter, setQuickFilter] = useState<InboxQuickFilter>('all');
   const [seenFighterIntros, setSeenFighterIntros] = useState<Set<string>>(new Set());
   const foregroundSyncRef = useRef(false);
@@ -576,6 +584,16 @@ export default function HomeScreen({
     },
     [applySyncSummary, fetchRelayInboxSeed, reloadInboxFromSource, runTriageOnNotifications],
   );
+
+  useEffect(() => {
+    void loadInboxSwipeSettings().then(setInboxSwipeSettings);
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        void loadInboxSwipeSettings().then(setInboxSwipeSettings);
+      }
+    });
+    return () => subscription.remove();
+  }, []);
 
   useEffect(() => {
     if (!accountReady || !isScreenFocused || !hasActiveAccount) return;
@@ -1717,8 +1735,10 @@ export default function HomeScreen({
           });
         }}
         renderItem={({ item }) => (
-          <FeedCard
+          <SwipeableFeedCard
             notification={item}
+            swipeLeftAction={inboxSwipeSettings.swipeLeft}
+            swipeRightAction={inboxSwipeSettings.swipeRight}
             draftText={
               draftTexts[item.id] ?? item.triage?.suggestedReply ?? ''
             }

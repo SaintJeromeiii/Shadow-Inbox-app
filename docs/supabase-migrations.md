@@ -1,6 +1,6 @@
 # Supabase Migrations
 
-Run these in the **Supabase SQL Editor** with **RLS disabled** for the migration session (migrations include `disable row level security` where needed).
+Run these in the **Supabase SQL Editor** (or `npx supabase db query --linked -f <file>`).
 
 ## Order
 
@@ -12,6 +12,7 @@ Run these in the **Supabase SQL Editor** with **RLS disabled** for the migration
 6. `backend/db/migrations/007_waitlist_signups.sql`
 7. `backend/db/migrations/008_device_account_links.sql` — **required for per-device Gmail isolation**
 8. `backend/db/migrations/009_ai_cost_daily_usage.sql` — **required for token-based AI cost tracking in Run Cost**
+9. `backend/db/migrations/010_enable_rls_lockdown.sql` — **required: closes public table access via anon key**
 
 ## Railway env vars
 
@@ -20,7 +21,7 @@ SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 ```
 
-Use the **service role** key on Railway, not the anon key.
+Use the **service role** key on Railway, not the anon key. With RLS enabled and no permissive policies, only the service role can read/write tables. The mobile app never talks to Supabase directly.
 
 ## Verify
 

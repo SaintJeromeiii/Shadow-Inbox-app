@@ -37,7 +37,7 @@ import {
 import { arcadeColors, arcadeFonts, arcadeTypography } from '../theme/arcadeTheme';
 import { ArcadeArchiveIcon, ArcadeTrashIcon } from './ArcadeIcons';
 
-interface FeedCardProps {
+export interface FeedCardProps {
   notification: TriagedNotification;
   draftText: string;
   onDraftChange: (id: string, text: string) => void;
@@ -63,6 +63,7 @@ interface FeedCardProps {
   selectionMode?: boolean;
   selected?: boolean;
   onToggleSelect?: (id: string) => void;
+  onExpandedChange?: (expanded: boolean) => void;
 }
 
 function formatTimestamp(iso: string): string {
@@ -227,6 +228,7 @@ export default function FeedCard({
   selectionMode = false,
   selected = false,
   onToggleSelect,
+  onExpandedChange,
 }: FeedCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [sending, setSending] = useState(false);
@@ -243,6 +245,10 @@ export default function FeedCard({
     null,
   );
   const [quickReplySending, setQuickReplySending] = useState(false);
+  useEffect(() => {
+    onExpandedChange?.(expanded);
+  }, [expanded, onExpandedChange]);
+
   const isRecording =
     voiceControl.isRecording &&
     voiceControl.recordingNotificationId === notification.id;
