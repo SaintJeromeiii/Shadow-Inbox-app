@@ -28,10 +28,14 @@ Shadow Inbox uses **Expo push tokens** backed by **Firebase Cloud Messaging (FCM
 
 6. Download `google-services.json` → copy to project root **and** `android/app/`
 7. Fix API key in [Google Cloud → shadow-inbox-app → Credentials](https://console.cloud.google.com/apis/credentials?project=shadow-inbox-app):
-   - Open the **Android key** whose value matches `client.api_key.current_key` in your local `google-services.json` (do not commit that file)
-   - Enable **Firebase Installations API** + **Firebase Cloud Messaging API**
-   - Application restrictions: **None** (testing) or Android app + SHA-1 above
-8. Rebuild from repo root (not `android/`):
+   - Open the **Android key** whose value matches `client.api_key.current_key` in your local `google-services.json` (currently `AIzaSyCkGXmSM212V51kgOtXMBTjFVFYcNzoKpg`)
+   - **API restrictions:** allow **Firebase Installations API** + **Firebase Cloud Messaging API** (or set to *Don't restrict* while testing)
+   - **Application restrictions:** *Android apps* → package `com.saintjeromeiii.shadowinbox` → add **both** SHA-1 fingerprints:
+     - Play App Signing: `BE:DD:90:86:88:AE:9D:BA:B8:97:44:88:75:E8:63:1F:29:D3:2B:0C`
+     - EAS upload key: run `eas credentials -p android` → Keystore → SHA-1
+   - SHA-1 in Firebase alone is not enough — the **Google Cloud API key** must allow the same package + SHA-1 pair
+8. Upload **FCM V1 service account** to Expo (for the server to *send* pushes): [expo.dev](https://expo.dev) → Project → Credentials → Android → FCM V1 service account key. This is separate from fixing `FIS_AUTH_ERROR`, but required before alerts actually arrive.
+9. Rebuild from repo root (not `android/`):
 
    ```bash
    npx expo run:android --device
@@ -67,6 +71,29 @@ Add **each** signing certificate SHA-1 to Firebase:
 | Play internal | Play Console → App integrity → App signing key |
 
 Re-download `google-services.json` after adding fingerprints.
+
+## Still seeing `FIS_AUTH_ERROR`?
+
+1. Confirm install source:
+   - **Play Internal Testing** → needs **Play App Signing SHA-1**
+   - **EAS APK sideload** → needs **EAS upload keystore SHA-1** instead
+2. Firebase → Project settings → Your Android app → confirm **both** SHA-1s are listed
+3. Google Cloud → Credentials → Android API key (`AIzaSyCkGXmSM212V51kgOtXMBTjFVFYcNzoKpg`):
+   - API restrictions include **Firebase Installations API**
+   - Application restrictions list package + matching SHA-1
+4. Settings → **AI STATUS → Push alerts** — note the error detail line
+5. Re-upload `GOOGLE_SERVICES_JSON` to EAS production and rebuild:
+
+   ```bash
+   npx eas-cli env:create \
+     --name GOOGLE_SERVICES_JSON \
+     --type file \
+     --value ./google-services.json \
+     --environment production \
+     --visibility secret \
+     --force
+   npx eas-cli build --profile production --platform android
+   ```
 
 ## Do not use `./gradlew clean`
 

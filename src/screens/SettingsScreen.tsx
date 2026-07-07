@@ -201,7 +201,7 @@ export default function SettingsScreen({
                 : pushStatus.state === 'pending'
                   ? 'Checking…'
                   : pushStatus.state === 'fis_auth_error'
-                    ? 'Firebase misconfigured (see docs/push-setup.md)'
+                    ? `Firebase misconfigured${pushStatus.detail ? `: ${pushStatus.detail}` : ' (see docs/push-setup.md)'}`
                     : pushStatus.state === 'permission_denied'
                       ? 'Notifications disabled in system settings'
                       : 'Unavailable on this build'}

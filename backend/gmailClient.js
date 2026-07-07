@@ -65,45 +65,55 @@ function extractUids(ids) {
   return { uids, gmailApiIds, unsupported, parsed };
 }
 
-async function archiveGmailApiMessages(accountKey, messageIds) {
-  let archived = 0;
+const GMAIL_MODIFY_CONCURRENCY = 8;
 
-  for (const messageId of messageIds) {
-    try {
-      await modifyMessageLabels(accountKey, messageId, {
-        removeLabelIds: ['INBOX'],
-      });
-      archived += 1;
-    } catch (error) {
-      console.warn(
-        `[${accountKey}] Could not archive Gmail message ${messageId}:`,
-        error instanceof Error ? error.message : error,
-      );
+async function runGmailModifyBatch(accountKey, messageIds, modifyFn) {
+  if (messageIds.length === 0) {
+    return 0;
+  }
+
+  let index = 0;
+  let processed = 0;
+
+  async function worker() {
+    while (index < messageIds.length) {
+      const currentIndex = index;
+      index += 1;
+      const messageId = messageIds[currentIndex];
+
+      try {
+        await modifyFn(accountKey, messageId);
+        processed += 1;
+      } catch (error) {
+        console.warn(
+          `[${accountKey}] Gmail modify failed for ${messageId}:`,
+          error instanceof Error ? error.message : error,
+        );
+      }
     }
   }
 
-  return archived;
+  const workerCount = Math.min(GMAIL_MODIFY_CONCURRENCY, messageIds.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+  return processed;
+}
+
+async function archiveGmailApiMessages(accountKey, messageIds) {
+  return runGmailModifyBatch(accountKey, messageIds, (key, messageId) =>
+    modifyMessageLabels(key, messageId, {
+      removeLabelIds: ['INBOX'],
+    }),
+  );
 }
 
 async function trashGmailApiMessages(accountKey, messageIds) {
-  let trashed = 0;
-
-  for (const messageId of messageIds) {
-    try {
-      await modifyMessageLabels(accountKey, messageId, {
-        addLabelIds: ['TRASH'],
-        removeLabelIds: ['INBOX'],
-      });
-      trashed += 1;
-    } catch (error) {
-      console.warn(
-        `[${accountKey}] Could not trash Gmail message ${messageId}:`,
-        error instanceof Error ? error.message : error,
-      );
-    }
-  }
-
-  return trashed;
+  return runGmailModifyBatch(accountKey, messageIds, (key, messageId) =>
+    modifyMessageLabels(key, messageId, {
+      addLabelIds: ['TRASH'],
+      removeLabelIds: ['INBOX'],
+    }),
+  );
 }
 
 async function archiveMessages(accountKey, ids, notifications = []) {

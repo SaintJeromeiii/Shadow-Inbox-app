@@ -72,10 +72,12 @@ import { getStageDifficulty, isBossLevel } from '../utils/stageDifficulty';
 import { useCharacter } from '../context/CharacterContext';
 import { fetchDailyEngagement, recordDailyClearance, type DailyEngagement } from '../services/dailyEngagementService';
 import { stopAllCharacterIntroAmbience } from '../services/retroSoundService';
+import InboxSearchBar from '../components/InboxSearchBar';
 import {
-  loadSeenFighterIntros,
-  markFighterIntroSeen,
-} from '../services/fighterIntroStorage';
+  filterInboxNotifications,
+  INBOX_QUICK_FILTERS,
+  type InboxQuickFilter,
+} from '../utils/inboxFilters';
 
 interface HomeScreenProps {
   onOpenDrawer: () => void;
@@ -190,6 +192,8 @@ export default function HomeScreen({
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncSummary, setSyncSummary] = useState<string | null>(null);
   const [pushBannerDismissed, setPushBannerDismissed] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [quickFilter, setQuickFilter] = useState<InboxQuickFilter>('all');
   const [seenFighterIntros, setSeenFighterIntros] = useState<Set<string>>(new Set());
   const foregroundSyncRef = useRef(false);
   const insets = useSafeAreaInsets();
@@ -763,13 +767,23 @@ export default function HomeScreen({
     [notifications],
   );
 
-  const filteredNotifications = useMemo(() => {
+  const tabFilteredNotifications = useMemo(() => {
     return notifications.filter((n) => {
       if (n.archived) return activeTab === 'ignore';
       if (!n.triage) return false;
       return n.triage.category === activeTab;
     });
   }, [notifications, activeTab]);
+
+  const filteredNotifications = useMemo(() => {
+    return filterInboxNotifications(tabFilteredNotifications, {
+      query: searchQuery,
+      quickFilter,
+    });
+  }, [tabFilteredNotifications, searchQuery, quickFilter]);
+
+  const isInboxFiltered =
+    searchQuery.trim().length > 0 || quickFilter !== 'all';
 
   const untriagedNotifications = useMemo(
     () => notifications.filter((n) => !n.archived && !n.triage),
@@ -800,6 +814,13 @@ export default function HomeScreen({
   useEffect(() => {
     exitSelectionMode();
   }, [activeTab, exitSelectionMode]);
+
+  useEffect(() => {
+    if (!isInboxFiltered) {
+      return;
+    }
+    exitSelectionMode();
+  }, [isInboxFiltered, exitSelectionMode]);
 
   const tabCounts = useMemo(() => {
     const counts: Record<FeedTab, number> = {
@@ -890,8 +911,67 @@ export default function HomeScreen({
         }
         return next;
       });
-    }, 220);
+    }, 100);
   }, []);
+
+  const restoreNotificationsToFeed = useCallback((items: TriagedNotification[]) => {
+    if (items.length === 0) {
+      return;
+    }
+
+    animateListChange();
+    const restoredIds = new Set(items.map((item) => item.id));
+    setNotifications((prev) => {
+      const kept = prev.filter((item) => !restoredIds.has(item.id));
+      return [...kept, ...items].sort(
+        (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+      );
+    });
+  }, []);
+
+  const syncEmailDeletion = useCallback(
+    (
+      emailIds: string[],
+      action: 'archive' | 'trash',
+      restoredItems: TriagedNotification[],
+      options: { totalRemoved: number; localOnlyCount?: number },
+    ) => {
+      const localOnlyCount = options.localOnlyCount ?? 0;
+
+      if (emailIds.length === 0) {
+        void applyLocalDeletion(options.totalRemoved);
+        return;
+      }
+
+      void (async () => {
+        const result =
+          action === 'archive'
+            ? await archiveEmails(emailIds)
+            : await trashEmails(emailIds);
+
+        if (!result.success) {
+          restoreNotificationsToFeed(restoredItems);
+          Alert.alert(
+            action === 'archive' ? 'Archive Failed' : 'Trash Failed',
+            result.error ??
+              `Could not ${action} on Gmail. Messages were restored — pull to refresh if needed.`,
+          );
+          return;
+        }
+
+        if (result.playerStats) {
+          applyPlayerStats(result.playerStats);
+        }
+
+        if (localOnlyCount > 0) {
+          await applyLocalDeletion(localOnlyCount);
+        } else if (!result.playerStats) {
+          await applyLocalDeletion(options.totalRemoved);
+        }
+      })();
+    },
+    [applyLocalDeletion, applyPlayerStats, restoreNotificationsToFeed],
+  );
 
   const handleDraftChange = useCallback((id: string, text: string) => {
     setDraftTexts((prev) => ({ ...prev, [id]: text }));
@@ -943,6 +1023,35 @@ export default function HomeScreen({
           folderLabel={activeFolderLabel}
         />
 
+        <InboxSearchBar value={searchQuery} onChangeText={setSearchQuery} />
+
+        <View style={styles.quickFilterRow}>
+          {INBOX_QUICK_FILTERS.map((chip) => {
+            const active = quickFilter === chip.key;
+            return (
+              <Pressable
+                key={chip.key}
+                style={[styles.quickFilterChip, active && styles.quickFilterChipActive]}
+                onPress={() => setQuickFilter(chip.key)}
+              >
+                <Text
+                  style={[
+                    styles.quickFilterChipText,
+                    active && styles.quickFilterChipTextActive,
+                  ]}
+                >
+                  {chip.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+          {isInboxFiltered ? (
+            <Text style={styles.quickFilterCount}>
+              {filteredNotifications.length} shown
+            </Text>
+          ) : null}
+        </View>
+
         <View style={styles.tabBar}>
           {TABS.map((tab) => {
             const isActive = activeTab === tab.key;
@@ -982,7 +1091,10 @@ export default function HomeScreen({
       activeFolderLabel,
       showFighterIntro,
       handleFighterIntroComplete,
-      isScreenFocused,
+      searchQuery,
+      quickFilter,
+      filteredNotifications.length,
+      isInboxFiltered,
     ],
   );
 
@@ -1042,60 +1154,46 @@ export default function HomeScreen({
 
   const handleGmailArchive = useCallback(
     async (notification: TriagedNotification) => {
-      if (notification.sourceApp !== 'Email') {
-        removeNotificationsFromFeed([notification.id]);
-        playDeleteSound();
-        await applyLocalDeletion(1);
-        return;
-      }
-
-      const result = await archiveEmails([notification.id]);
-      if (!result.success) {
-        Alert.alert(
-          'Archive Failed',
-          result.error ?? 'Could not archive this email. Is the relay running?',
-        );
-        return;
-      }
-
       removeNotificationsFromFeed([notification.id]);
       playDeleteSound();
-      if (result.playerStats) {
-        applyPlayerStats(result.playerStats);
-      } else {
+
+      if (notification.sourceApp !== 'Email') {
         await applyLocalDeletion(1);
+        return;
       }
+
+      syncEmailDeletion([notification.id], 'archive', [notification], {
+        totalRemoved: 1,
+      });
     },
-    [removeNotificationsFromFeed, playDeleteSound, applyPlayerStats, applyLocalDeletion],
+    [
+      removeNotificationsFromFeed,
+      playDeleteSound,
+      applyLocalDeletion,
+      syncEmailDeletion,
+    ],
   );
 
   const handleTrash = useCallback(
     async (notification: TriagedNotification) => {
-      if (notification.sourceApp !== 'Email') {
-        removeNotificationsFromFeed([notification.id]);
-        playDeleteSound();
-        await applyLocalDeletion(1);
-        return;
-      }
-
-      const result = await trashEmails([notification.id]);
-      if (!result.success) {
-        Alert.alert(
-          'Trash Failed',
-          result.error ?? 'Could not trash this email. Is the relay running?',
-        );
-        return;
-      }
-
       removeNotificationsFromFeed([notification.id]);
       playDeleteSound();
-      if (result.playerStats) {
-        applyPlayerStats(result.playerStats);
-      } else {
+
+      if (notification.sourceApp !== 'Email') {
         await applyLocalDeletion(1);
+        return;
       }
+
+      syncEmailDeletion([notification.id], 'trash', [notification], {
+        totalRemoved: 1,
+      });
     },
-    [removeNotificationsFromFeed, playDeleteSound, applyPlayerStats, applyLocalDeletion],
+    [
+      removeNotificationsFromFeed,
+      playDeleteSound,
+      applyLocalDeletion,
+      syncEmailDeletion,
+    ],
   );
 
   const handleBulkTrash = useCallback(async () => {
@@ -1117,34 +1215,25 @@ export default function HomeScreen({
               setBulkActionBusy(true);
               try {
                 const selected = notifications.filter((item) => selectedIds.has(item.id));
-                const emailIds = selected
-                  .filter((item) => item.sourceApp === 'Email')
-                  .map((item) => item.id);
+                const emailItems = selected.filter((item) => item.sourceApp === 'Email');
+                const emailIds = emailItems.map((item) => item.id);
                 const nonEmailIds = selected
                   .filter((item) => item.sourceApp !== 'Email')
                   .map((item) => item.id);
-
-                if (emailIds.length > 0) {
-                  const result = await trashEmails(emailIds);
-                  if (!result.success) {
-                    Alert.alert(
-                      'Trash Failed',
-                      result.error ?? 'Could not trash selected messages.',
-                    );
-                    return;
-                  }
-                  if (result.playerStats) {
-                    applyPlayerStats(result.playerStats);
-                  }
-                }
-
                 const removedIds = [...emailIds, ...nonEmailIds];
+
                 if (removedIds.length > 0) {
                   removeNotificationsFromFeed(removedIds);
                   playDeleteSound();
-                  if (!emailIds.length || emailIds.length < removedIds.length) {
-                    await applyLocalDeletion(removedIds.length);
-                  }
+                }
+
+                if (emailIds.length > 0) {
+                  syncEmailDeletion(emailIds, 'trash', selected, {
+                    totalRemoved: removedIds.length,
+                    localOnlyCount: nonEmailIds.length,
+                  });
+                } else if (removedIds.length > 0) {
+                  await applyLocalDeletion(removedIds.length);
                 }
 
                 exitSelectionMode();
@@ -1158,13 +1247,13 @@ export default function HomeScreen({
     );
   }, [
     applyLocalDeletion,
-    applyPlayerStats,
     bulkActionBusy,
     exitSelectionMode,
     notifications,
     playDeleteSound,
     removeNotificationsFromFeed,
     selectedIds,
+    syncEmailDeletion,
   ]);
 
   const handleBulkArchive = useCallback(async () => {
@@ -1185,34 +1274,25 @@ export default function HomeScreen({
               setBulkActionBusy(true);
               try {
                 const selected = notifications.filter((item) => selectedIds.has(item.id));
-                const emailIds = selected
-                  .filter((item) => item.sourceApp === 'Email')
-                  .map((item) => item.id);
+                const emailItems = selected.filter((item) => item.sourceApp === 'Email');
+                const emailIds = emailItems.map((item) => item.id);
                 const nonEmailIds = selected
                   .filter((item) => item.sourceApp !== 'Email')
                   .map((item) => item.id);
-
-                if (emailIds.length > 0) {
-                  const result = await archiveEmails(emailIds);
-                  if (!result.success) {
-                    Alert.alert(
-                      'Archive Failed',
-                      result.error ?? 'Could not archive selected messages.',
-                    );
-                    return;
-                  }
-                  if (result.playerStats) {
-                    applyPlayerStats(result.playerStats);
-                  }
-                }
-
                 const removedIds = [...emailIds, ...nonEmailIds];
+
                 if (removedIds.length > 0) {
                   removeNotificationsFromFeed(removedIds);
                   playDeleteSound();
-                  if (!emailIds.length || emailIds.length < removedIds.length) {
-                    await applyLocalDeletion(removedIds.length);
-                  }
+                }
+
+                if (emailIds.length > 0) {
+                  syncEmailDeletion(emailIds, 'archive', selected, {
+                    totalRemoved: removedIds.length,
+                    localOnlyCount: nonEmailIds.length,
+                  });
+                } else if (removedIds.length > 0) {
+                  await applyLocalDeletion(removedIds.length);
                 }
 
                 exitSelectionMode();
@@ -1226,13 +1306,13 @@ export default function HomeScreen({
     );
   }, [
     applyLocalDeletion,
-    applyPlayerStats,
     bulkActionBusy,
     exitSelectionMode,
     notifications,
     playDeleteSound,
     removeNotificationsFromFeed,
     selectedIds,
+    syncEmailDeletion,
   ]);
 
   const handleProcessFeed = useCallback(async () => {
@@ -1356,9 +1436,18 @@ export default function HomeScreen({
 
   const renderEmpty = () => {
     let subtitle = 'Pull down to refresh when new mail arrives.';
+    let title =
+      activeTab === 'ignore'
+        ? 'Inbox zero — archived'
+        : activeTab === 'action_required'
+          ? 'All caught up'
+          : 'Nothing to review';
 
     if (processing) {
       subtitle = 'AI is sorting your inbox…';
+    } else if (isInboxFiltered && tabFilteredNotifications.length > 0) {
+      title = 'No matches';
+      subtitle = 'Try a different search term or clear the quick filter.';
     } else if (!hasActiveAccount) {
       subtitle = 'Connect Gmail in Settings to load your real inbox.';
     } else if (syncError) {
@@ -1376,13 +1465,7 @@ export default function HomeScreen({
       <View style={styles.emptyIconWrap}>
         <Ionicons name="mail-open-outline" size={44} color="#3D4A63" />
       </View>
-      <Text style={styles.emptyTitle}>
-        {activeTab === 'ignore'
-          ? 'Inbox zero — archived'
-          : activeTab === 'action_required'
-            ? 'All caught up'
-            : 'Nothing to review'}
-      </Text>
+      <Text style={styles.emptyTitle}>{title}</Text>
       <Text style={styles.emptySubtitle}>{subtitle}</Text>
     </View>
     );
@@ -2123,6 +2206,39 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
     marginBottom: 12,
+  },
+  quickFilterRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 10,
+  },
+  quickFilterChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: arcadeColors.borderMuted,
+    backgroundColor: arcadeColors.bgPanel,
+  },
+  quickFilterChipActive: {
+    borderColor: arcadeColors.neonCyan,
+    backgroundColor: 'rgba(91, 141, 239, 0.15)',
+  },
+  quickFilterChipText: {
+    color: arcadeColors.textMuted,
+    fontSize: 11,
+    fontFamily: arcadeFonts.pixel,
+  },
+  quickFilterChipTextActive: {
+    color: arcadeColors.neonCyan,
+  },
+  quickFilterCount: {
+    color: arcadeColors.textMuted,
+    fontSize: 11,
+    fontFamily: arcadeFonts.body,
+    marginLeft: 'auto',
   },
   tab: {
     flex: 1,

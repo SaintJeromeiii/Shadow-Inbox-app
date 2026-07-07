@@ -13,7 +13,9 @@ function buildCopy(status: PushSetupStatus): { title: string; body: string } | n
     case 'fis_auth_error':
       return {
         title: 'Push alerts unavailable',
-        body: 'Firebase could not verify this build. Fix SHA-1 + google-services.json in Firebase, then rebuild the app.',
+        body:
+          status.detail ??
+          'Firebase could not verify this build. In Google Cloud, open the Android API key from google-services.json, allow Firebase Installations API, and add your Play App Signing SHA-1 under Android app restrictions.',
       };
     case 'permission_denied':
       return {
