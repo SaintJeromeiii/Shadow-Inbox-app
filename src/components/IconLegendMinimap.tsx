@@ -118,14 +118,14 @@ const LEGEND_SECTIONS: LegendSection[] = [
     title: 'FEED ACTIONS',
     entries: [
       {
-        label: 'Archive',
+        label: 'Archive Box',
         description: 'Archive / stash a message out of the active feed.',
-        icon: <ArcadeArchiveIcon size={16} color={arcadeColors.textMuted} />,
+        icon: <ArcadeArchiveIcon size={18} color={arcadeColors.neonCyan} />,
       },
       {
-        label: 'Trash',
+        label: 'Trash Can',
         description: 'Delete / purge a message from the case file.',
-        icon: <ArcadeTrashIcon size={16} color={arcadeColors.neonRed} />,
+        icon: <ArcadeTrashIcon size={18} color={arcadeColors.neonRed} />,
       },
       {
         label: '🧠',
@@ -237,7 +237,7 @@ export default function IconLegendMinimap({ embedded = false }: IconLegendMinima
               </View>
 
               <Text style={styles.sheetHint}>
-                Field guide to every symbol in Jeromeomegatron&apos;s Shadow Inbox.
+                Field guide to every symbol in Shadow Inbox.
               </Text>
 
               <ScrollView

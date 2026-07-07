@@ -7,7 +7,12 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { playCharacterDeleteSound, playRetroSound, playTysonComboSound, preloadRetroSounds } from '../services/retroSoundService';
+import {
+  playCharacterDeleteSound,
+  playRandomDeleteMilestoneSound,
+  playRetroSound,
+  preloadRetroSounds,
+} from '../services/retroSoundService';
 import ActionCompleteToast from '../components/ActionCompleteToast';
 import LevelUpFlash from '../components/LevelUpFlash';
 import { useCharacter } from './CharacterContext';
@@ -44,7 +49,7 @@ export function RetroFeedbackProvider({ children }: { children: ReactNode }) {
     void playCharacterDeleteSound(characterId);
 
     if (deletionCountRef.current % COMBO_DELETE_INTERVAL === 0) {
-      void playTysonComboSound();
+      void playRandomDeleteMilestoneSound();
     }
   }, [characterId]);
 

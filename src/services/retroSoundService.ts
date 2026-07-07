@@ -90,6 +90,8 @@ async function playSoundInternal(key: RetroSoundKey, volume = 0.85) {
   const player = getPlayer(key);
   player.loop = false;
   player.volume = volume;
+  player.playbackRate = 1;
+  player.shouldCorrectPitch = true;
   await player.seekTo(0);
   player.play();
 }
@@ -137,17 +139,114 @@ export function playCharacterDeleteSound(characterId: CharacterId): Promise<void
   return playRetroSound(key);
 }
 
-/** Rapid Punch-Out style combo — every N inbox clears. */
-export function playTysonComboSound(): Promise<void> {
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+type MilestoneSequenceStep = {
+  key: RetroSoundKey;
+  volume?: number;
+  playbackRate?: number;
+  delayAfterMs?: number;
+};
+
+const DELETE_MILESTONE_SEQUENCES: MilestoneSequenceStep[][] = [
+  [
+    { key: 'deletePunch', volume: 0.9, playbackRate: 1.02, delayAfterMs: 110 },
+    { key: 'deletePunch', volume: 0.96, playbackRate: 1.08, delayAfterMs: 110 },
+    { key: 'deletePunch', volume: 1, playbackRate: 1.14 },
+  ],
+  [
+    { key: 'deleteAction', volume: 0.86, playbackRate: 1.18, delayAfterMs: 120 },
+    { key: 'actionComplete', volume: 0.92, playbackRate: 1.08 },
+  ],
+  [
+    { key: 'deleteSolarBeam', volume: 0.82, playbackRate: 0.92, delayAfterMs: 150 },
+    { key: 'actionComplete', volume: 0.88, playbackRate: 1.18 },
+  ],
+  [
+    { key: 'deleteWrench', volume: 0.88, playbackRate: 1.06, delayAfterMs: 95 },
+    { key: 'deletePunch', volume: 0.96, playbackRate: 1.14, delayAfterMs: 95 },
+    { key: 'deleteAction', volume: 0.9, playbackRate: 1.2 },
+  ],
+  [
+    { key: 'actionComplete', volume: 0.88, playbackRate: 1.04, delayAfterMs: 120 },
+    { key: 'levelUp', volume: 0.76, playbackRate: 1.12 },
+  ],
+  [
+    { key: 'deleteAction', volume: 0.84, playbackRate: 1.32, delayAfterMs: 75 },
+    { key: 'deleteAction', volume: 0.88, playbackRate: 1.42, delayAfterMs: 75 },
+    { key: 'actionComplete', volume: 0.9, playbackRate: 1.26 },
+  ],
+  [
+    { key: 'deletePunch', volume: 0.92, playbackRate: 0.84, delayAfterMs: 130 },
+    { key: 'deletePunch', volume: 0.97, playbackRate: 0.92, delayAfterMs: 120 },
+    { key: 'levelUp', volume: 0.72, playbackRate: 0.94 },
+  ],
+  [
+    { key: 'deleteSolarBeam', volume: 0.84, playbackRate: 1.24, delayAfterMs: 85 },
+    { key: 'deleteSolarBeam', volume: 0.82, playbackRate: 1.34, delayAfterMs: 85 },
+    { key: 'actionComplete', volume: 0.86, playbackRate: 1.12 },
+  ],
+  [
+    { key: 'deleteWrench', volume: 0.9, playbackRate: 0.9, delayAfterMs: 100 },
+    { key: 'deleteWrench', volume: 0.94, playbackRate: 1.02, delayAfterMs: 100 },
+    { key: 'deletePunch', volume: 0.98, playbackRate: 1.18 },
+  ],
+  [
+    { key: 'actionComplete', volume: 0.86, playbackRate: 1.22, delayAfterMs: 90 },
+    { key: 'actionComplete', volume: 0.9, playbackRate: 1.34, delayAfterMs: 90 },
+    { key: 'levelUp', volume: 0.74, playbackRate: 1.28 },
+  ],
+  [
+    { key: 'deleteSolarBeam', volume: 0.8, playbackRate: 0.82, delayAfterMs: 140 },
+    { key: 'deleteWrench', volume: 0.9, playbackRate: 1.08, delayAfterMs: 95 },
+    { key: 'actionComplete', volume: 0.88, playbackRate: 1.16 },
+  ],
+  [
+    { key: 'deletePunch', volume: 0.92, playbackRate: 1.28, delayAfterMs: 70 },
+    { key: 'deletePunch', volume: 0.96, playbackRate: 1.4, delayAfterMs: 70 },
+    { key: 'deletePunch', volume: 1, playbackRate: 1.52, delayAfterMs: 70 },
+    { key: 'actionComplete', volume: 0.88, playbackRate: 1.12 },
+  ],
+  [
+    { key: 'deleteAction', volume: 0.84, playbackRate: 0.88, delayAfterMs: 110 },
+    { key: 'deleteSolarBeam', volume: 0.82, playbackRate: 1.08, delayAfterMs: 110 },
+    { key: 'levelUp', volume: 0.72, playbackRate: 1.04 },
+  ],
+];
+
+let lastMilestoneSequenceIndex = -1;
+
+/** Random retro bonus cue — every N inbox clears. */
+export function playRandomDeleteMilestoneSound(): Promise<void> {
   return runOnMainThread(async () => {
     try {
-      await playSoundInternal('deletePunch', 0.92);
-      await new Promise((resolve) => setTimeout(resolve, 110));
-      await playSoundInternal('deletePunch', 0.96);
-      await new Promise((resolve) => setTimeout(resolve, 110));
-      await playSoundInternal('deletePunch', 1);
+      const availableCount = DELETE_MILESTONE_SEQUENCES.length;
+      const randomIndex = Math.floor(Math.random() * availableCount);
+      const sequenceIndex =
+        availableCount > 1 && randomIndex === lastMilestoneSequenceIndex
+          ? (randomIndex + 1) % availableCount
+          : randomIndex;
+      lastMilestoneSequenceIndex = sequenceIndex;
+      const sequence =
+        DELETE_MILESTONE_SEQUENCES[sequenceIndex] ?? DELETE_MILESTONE_SEQUENCES[0];
+
+      for (const step of sequence) {
+        await ensureAudioMode();
+        const player = getPlayer(step.key);
+        player.loop = false;
+        player.volume = step.volume ?? 0.85;
+        player.shouldCorrectPitch = true;
+        player.playbackRate = step.playbackRate ?? 1;
+        await player.seekTo(0);
+        player.play();
+        if (step.delayAfterMs) {
+          await wait(step.delayAfterMs);
+        }
+      }
     } catch (error) {
-      console.warn('[RetroSound] Tyson combo failed:', error);
+      console.warn('[RetroSound] Milestone playback failed:', error);
     }
   });
 }

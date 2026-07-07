@@ -5,6 +5,7 @@ import {
   Pressable,
   StyleSheet,
   Alert,
+  Linking,
   TextInput,
   ActivityIndicator,
   Keyboard,
@@ -93,6 +94,58 @@ function urgencyColor(score: number): string {
   if (score >= 8) return '#FF6B6B';
   if (score >= 5) return '#FFB347';
   return '#6BCB77';
+}
+
+const LINK_PATTERN =
+  /((?:https?:\/\/|www\.)[^\s<]+|mailto:[^\s<]+|[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/gi;
+
+function normalizeLinkTarget(value: string): string {
+  const trimmed = value.trim().replace(/[),.!?:;]+$/g, '');
+  if (/^mailto:/i.test(trimmed)) {
+    return trimmed;
+  }
+  if (/^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i.test(trimmed)) {
+    return `mailto:${trimmed}`;
+  }
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  return `https://${trimmed}`;
+}
+
+function splitTextWithLinks(text: string): Array<{ text: string; url?: string }> {
+  if (!text) {
+    return [{ text: '' }];
+  }
+
+  const matches = [...text.matchAll(LINK_PATTERN)];
+  if (matches.length === 0) {
+    return [{ text }];
+  }
+
+  const parts: Array<{ text: string; url?: string }> = [];
+  let lastIndex = 0;
+
+  for (const match of matches) {
+    const matchedText = match[0];
+    const index = match.index ?? 0;
+
+    if (index > lastIndex) {
+      parts.push({ text: text.slice(lastIndex, index) });
+    }
+
+    parts.push({
+      text: matchedText,
+      url: normalizeLinkTarget(matchedText),
+    });
+    lastIndex = index + matchedText.length;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push({ text: text.slice(lastIndex) });
+  }
+
+  return parts;
 }
 
 function sourceIconName(
@@ -416,6 +469,15 @@ export default function FeedCard({
     event?.stopPropagation?.();
   };
 
+  const handleOpenLink = async (url: string) => {
+    stopCardPress();
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert('Link Unavailable', 'Could not open this link on your device.');
+    }
+  };
+
   return (
     <Animated.View style={{ opacity: fadeAnim }}>
     <Pressable
@@ -612,7 +674,23 @@ export default function FeedCard({
         <View style={styles.expandedSection}>
           <Text style={styles.expandedLabel}>Raw message</Text>
           <View style={styles.rawTextContainer}>
-            <Text style={styles.rawText}>{notification.rawText}</Text>
+            <Text style={styles.rawText}>
+              {splitTextWithLinks(notification.rawText).map((part, index) =>
+                part.url ? (
+                  <Text
+                    key={`${notification.id}-link-${index}`}
+                    style={styles.rawTextLink}
+                    onPress={() => {
+                      void handleOpenLink(part.url!);
+                    }}
+                  >
+                    {part.text}
+                  </Text>
+                ) : (
+                  <Text key={`${notification.id}-text-${index}`}>{part.text}</Text>
+                ),
+              )}
+            </Text>
           </View>
 
           {isActionRequired && (
@@ -1184,6 +1262,10 @@ const styles = StyleSheet.create({
     ...arcadeTypography.retroBody,
     fontSize: 12,
     lineHeight: 19,
+  },
+  rawTextLink: {
+    color: arcadeColors.neonCyan,
+    textDecorationLine: 'underline',
   },
   replyBlock: {
     marginTop: 16,
