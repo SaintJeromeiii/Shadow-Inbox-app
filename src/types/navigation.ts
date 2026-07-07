@@ -5,6 +5,7 @@ export type DrawerRoute =
   | 'firewall_config'
   | 'hero_status'
   | 'intel_deck'
+  | 'run_cost'
   | 'auto_pilot'
   | 'knowledge_core'
   | 'admin_logs'
@@ -49,6 +50,11 @@ export const SECONDARY_DRAWER_ITEMS: DrawerMenuItem[] = [
     route: 'intel_deck',
     label: 'INTEL DECK',
     subtitle: 'Briefing, quests, finance, timeline',
+  },
+  {
+    route: 'run_cost',
+    label: 'RUN COST',
+    subtitle: 'Tracked spend, receipts, AI activity',
   },
   {
     route: 'auto_pilot',

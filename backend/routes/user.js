@@ -9,6 +9,7 @@ const {
 } = require('../userProfileService');
 const { getDailyEngagement, recordClearance } = require('../dailyProgressService');
 const { getUsageSummary } = require('../aiUsageService');
+const { buildRunCostSummary } = require('../runCostService');
 
 const router = express.Router();
 
@@ -87,6 +88,21 @@ router.get('/ai-usage', async (req, res) => {
     console.error('[User] GET /ai-usage failed:', error);
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Failed to load AI usage.',
+    });
+  }
+});
+
+router.get('/run-cost', async (req, res) => {
+  const accountKey = getAccountKeyFromRequest(req);
+  const monthKey = req.query?.monthKey ? String(req.query.monthKey) : undefined;
+
+  try {
+    const summary = await buildRunCostSummary(accountKey, { monthKey });
+    res.json({ success: true, accountKey, summary });
+  } catch (error) {
+    console.error('[User] GET /run-cost failed:', error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Failed to load run cost summary.',
     });
   }
 });

@@ -4,6 +4,7 @@ const { loadKnowledgeBase } = require('./knowledgeBase');
 const { retrieveRelevantMemoriesForText } = require('./memoryEngine');
 
 const { API_KEY, API_URL, MODEL } = require('./openaiConfig');
+const { recordAiUsageCost } = require('./aiCostTracker');
 const WHISPER_URL =
   process.env.WHISPER_API_URL || 'https://api.openai.com/v1/audio/transcriptions';
 const WHISPER_MODEL = process.env.WHISPER_MODEL || 'whisper-1';
@@ -122,6 +123,7 @@ async function transcribeAudioFile(filePath, mimeType) {
 }
 
 async function callVoiceRedraftLlm({
+  accountKey,
   originalMessage,
   currentDraft,
   emailId,
@@ -160,6 +162,18 @@ async function callVoiceRedraftLlm({
     const payload = await response.json();
     if (!response.ok) {
       throw new Error(payload?.error?.message || 'Voice redraft LLM request failed.');
+    }
+
+    if (payload?.usage) {
+      void recordAiUsageCost({
+        accountKey: accountKey || 'personal',
+        provider: 'openai',
+        model: MODEL,
+        type: 'llm',
+        promptTokens: payload.usage.prompt_tokens,
+        completionTokens: payload.usage.completion_tokens,
+        totalTokens: payload.usage.total_tokens,
+      });
     }
 
     const draft = payload?.choices?.[0]?.message?.content?.trim();
@@ -202,6 +216,7 @@ async function processVoiceCommand({
   }
 
   const draft = await callVoiceRedraftLlm({
+    accountKey,
     originalMessage: String(originalMessage || ''),
     currentDraft: safeDraft,
     emailId,

@@ -73,6 +73,7 @@ router.post('/generate', async (req, res) => {
     await consumeAiQuota(accountKey, 'llm', 1);
 
     const result = await generateQuickReplies({
+      accountKey,
       context,
       knowledgeBase,
     });

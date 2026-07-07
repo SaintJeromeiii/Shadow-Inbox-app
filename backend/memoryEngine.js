@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { tryConsumeAiQuota } = require('./aiUsageService');
+const { recordAiUsageCost } = require('./aiCostTracker');
 
 const MEMORY_PATH = path.join(__dirname, 'vector_memory.json');
 const MAX_MEMORY_ENTRIES = 2000;
@@ -104,7 +105,7 @@ async function embedWithLocalModel(text) {
   return normalizeVector(output.data);
 }
 
-async function embedWithOpenAi(text) {
+async function embedWithOpenAi(text, accountKey = 'personal') {
   const response = await fetch(OPENAI_EMBEDDING_URL, {
     method: 'POST',
     headers: {
@@ -120,6 +121,18 @@ async function embedWithOpenAi(text) {
   const payload = await response.json();
   if (!response.ok) {
     throw new Error(payload?.error?.message || 'OpenAI embedding request failed.');
+  }
+
+  if (payload?.usage) {
+    void recordAiUsageCost({
+      accountKey,
+      provider: 'openai',
+      model: OPENAI_EMBEDDING_MODEL,
+      type: 'embedding',
+      promptTokens: payload.usage.prompt_tokens ?? payload.usage.total_tokens,
+      completionTokens: 0,
+      totalTokens: payload.usage.total_tokens ?? payload.usage.prompt_tokens,
+    });
   }
 
   const vector = payload?.data?.[0]?.embedding;
@@ -144,7 +157,7 @@ async function generateEmbedding(text, options = {}) {
 
     if (allowed) {
       try {
-        const vector = await embedWithOpenAi(input);
+        const vector = await embedWithOpenAi(input, accountKey || 'personal');
         return { vector, model: OPENAI_EMBEDDING_MODEL, provider: 'openai' };
       } catch (error) {
         console.warn('[Memory] OpenAI embedding failed, falling back to local model:', error);

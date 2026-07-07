@@ -1,6 +1,7 @@
 const { getKnowledgeForTriage } = require('./userProfileService');
 const { reserveTriageQuota, DAILY_LIMIT, getDailyUsage } = require('./aiUsageService');
 const { recordOpenAiFailure } = require('./openAiCircuitBreaker');
+const { recordAiUsageCost } = require('./aiCostTracker');
 
 const API_KEY = process.env.OPENAI_API_KEY || '';
 const API_URL =
@@ -303,7 +304,7 @@ async function fetchWithTimeout(url, options, timeoutMs) {
   }
 }
 
-async function callLlmApi(notification, context) {
+async function callLlmApi(notification, context, accountKey = 'personal') {
   const response = await fetchWithTimeout(
     API_URL,
     {
@@ -337,6 +338,17 @@ async function callLlmApi(notification, context) {
   }
 
   const data = await response.json();
+  if (data?.usage) {
+    void recordAiUsageCost({
+      accountKey,
+      provider: 'openai',
+      model: MODEL,
+      type: 'triage',
+      promptTokens: data.usage.prompt_tokens,
+      completionTokens: data.usage.completion_tokens,
+      totalTokens: data.usage.total_tokens,
+    });
+  }
   const content = data.choices?.[0]?.message?.content;
   if (!content) {
     throw new Error('Empty LLM response body');
@@ -361,7 +373,7 @@ async function triageNotification(notification, accountKey) {
   }
 
   try {
-    const triage = await callLlmApi(notification, context);
+    const triage = await callLlmApi(notification, context, accountKey);
     return { triage, mode: 'live' };
   } catch (error) {
     recordOpenAiFailure(error);

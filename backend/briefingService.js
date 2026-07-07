@@ -2,6 +2,7 @@ const { listAccounts, listAccountKeys } = require('./accounts');
 const { readNotifications } = require('./notificationFeed');
 const { appendExecutiveBrief } = require('./executiveBriefsLedger');
 const { API_KEY, API_URL, MODEL } = require('./openaiConfig');
+const { recordAiUsageCost } = require('./aiCostTracker');
 
 const REQUEST_TIMEOUT_MS = 45_000;
 const BRIEFING_WINDOW_HOURS = 24;
@@ -204,7 +205,7 @@ function formatStoredBriefing(stored) {
   };
 }
 
-async function callExecutiveBriefingLlm({ items, knowledgeBase }) {
+async function callExecutiveBriefingLlm({ items, knowledgeBase, accountKey = 'personal' }) {
   const { apiKey, apiUrl, model } = getOpenAiConfig();
 
   if (isPlaceholderApiKey(apiKey)) {
@@ -256,6 +257,18 @@ async function callExecutiveBriefingLlm({ items, knowledgeBase }) {
           payload?.error ||
           `Briefing LLM request failed (${response.status})`,
       );
+    }
+
+    if (payload?.usage) {
+      void recordAiUsageCost({
+        accountKey,
+        provider: 'openai',
+        model,
+        type: 'llm',
+        promptTokens: payload.usage.prompt_tokens,
+        completionTokens: payload.usage.completion_tokens,
+        totalTokens: payload.usage.total_tokens,
+      });
     }
 
     const markdown = payload?.choices?.[0]?.message?.content?.trim();
@@ -364,7 +377,7 @@ async function generateExecutiveBrief({
     return quiet;
   }
 
-  const llmResult = await callExecutiveBriefingLlm({ items, knowledgeBase });
+  const llmResult = await callExecutiveBriefingLlm({ items, knowledgeBase, accountKey });
   const urgencyLevel = inferUrgencyLevel(items);
   const stats = buildBriefingStats(items, accounts.length);
   const generatedAt = new Date().toISOString();

@@ -4,6 +4,7 @@ const {
   VALID_PROJECTS,
 } = require('./financeLedger');
 const { tryConsumeAiQuota } = require('./aiUsageService');
+const { recordAiUsageCost } = require('./aiCostTracker');
 
 const { API_KEY, API_URL, MODEL } = require('./openaiConfig');
 const REQUEST_TIMEOUT_MS = 25_000;
@@ -110,6 +111,18 @@ async function callFinanceExtraction(notification) {
       throw new Error(payload?.error?.message || 'Finance extraction failed.');
     }
 
+    if (payload?.usage) {
+      void recordAiUsageCost({
+        accountKey: notification.accountKey || 'personal',
+        provider: 'openai',
+        model: MODEL,
+        type: 'llm',
+        promptTokens: payload.usage.prompt_tokens,
+        completionTokens: payload.usage.completion_tokens,
+        totalTokens: payload.usage.total_tokens,
+      });
+    }
+
     const content = payload?.choices?.[0]?.message?.content || '{}';
     return JSON.parse(content);
   } finally {
@@ -155,7 +168,7 @@ async function maybeExtractFinance(accountKey, notification) {
     const allowed = await tryConsumeAiQuota(accountKey, 'llm', 1);
     if (allowed) {
       try {
-        parsed = await callFinanceExtraction(notification);
+        parsed = await callFinanceExtraction({ ...notification, accountKey });
       } catch (error) {
         console.warn(
           `[Finance] LLM extraction failed for ${notification.id}:`,

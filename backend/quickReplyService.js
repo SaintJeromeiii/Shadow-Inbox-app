@@ -2,6 +2,7 @@ const { loadKnowledgeBase } = require('./knowledgeBase');
 const { retrieveRelevantMemoriesForText } = require('./memoryEngine');
 
 const { API_KEY, API_URL, MODEL } = require('./openaiConfig');
+const { recordAiUsageCost } = require('./aiCostTracker');
 const REQUEST_TIMEOUT_MS = 45_000;
 
 const QUICK_REPLY_SYSTEM_PROMPT = `You are Jerome's executive reply assistant for Shadow Inbox.
@@ -44,7 +45,7 @@ function buildFallbackQuickReplies(context) {
   };
 }
 
-async function generateQuickReplies({ context, knowledgeBase = '' }) {
+async function generateQuickReplies({ accountKey = 'personal', context, knowledgeBase = '' }) {
   const safeContext = String(context || '').trim();
   if (!safeContext) {
     throw new Error('Message context is required to generate quick replies.');
@@ -93,6 +94,18 @@ async function generateQuickReplies({ context, knowledgeBase = '' }) {
     const payload = await response.json();
     if (!response.ok) {
       throw new Error(payload?.error?.message || 'Quick reply generation failed.');
+    }
+
+    if (payload?.usage) {
+      void recordAiUsageCost({
+        accountKey,
+        provider: 'openai',
+        model: MODEL,
+        type: 'llm',
+        promptTokens: payload.usage.prompt_tokens,
+        completionTokens: payload.usage.completion_tokens,
+        totalTokens: payload.usage.total_tokens,
+      });
     }
 
     const raw = payload?.choices?.[0]?.message?.content;

@@ -2,6 +2,7 @@ const { loadKnowledgeBase } = require('./knowledgeBase');
 const { retrieveRelevantMemoriesForText } = require('./memoryEngine');
 
 const { API_KEY, API_URL, MODEL } = require('./openaiConfig');
+const { recordAiUsageCost } = require('./aiCostTracker');
 const REQUEST_TIMEOUT_MS = 30_000;
 
 const QUICK_TEMPLATE =
@@ -77,6 +78,7 @@ function fallbackRedraft(currentDraft, tone) {
 }
 
 async function callRedraftLlm({
+  accountKey,
   originalMessage,
   currentDraft,
   emailId,
@@ -110,6 +112,18 @@ async function callRedraftLlm({
     const payload = await response.json();
     if (!response.ok) {
       throw new Error(payload?.error?.message || 'Redraft LLM request failed.');
+    }
+
+    if (payload?.usage) {
+      void recordAiUsageCost({
+        accountKey: accountKey || 'personal',
+        provider: 'openai',
+        model: MODEL,
+        type: 'llm',
+        promptTokens: payload.usage.prompt_tokens,
+        completionTokens: payload.usage.completion_tokens,
+        totalTokens: payload.usage.total_tokens,
+      });
     }
 
     const draft = payload?.choices?.[0]?.message?.content?.trim();
@@ -171,6 +185,7 @@ async function redraftReply({
 
   try {
     const draft = await callRedraftLlm({
+      accountKey,
       originalMessage: String(originalMessage || ''),
       currentDraft: safeDraft,
       emailId,

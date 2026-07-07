@@ -11,6 +11,7 @@ import CharacterSelectScreen from './CharacterSelectScreen';
 import CharacterRankingScreen from './CharacterRankingScreen';
 import QuantumRealmTransitionScreen from './QuantumRealmTransitionScreen';
 import SettingsScreen from './SettingsScreen';
+import RunCostScreen from './RunCostScreen';
 import SideDeckDrawer from '../components/SideDeckDrawer';
 import { useAccount } from '../context/AccountContext';
 import { useCharacter } from '../context/CharacterContext';
@@ -156,6 +157,13 @@ export default function AppShell() {
           onJumpToEmail={handleJumpToEmail}
           notifications={notificationsSnapshot}
           isScreenFocused={route === 'intel_deck'}
+        />
+      </ScreenSlot>
+
+      <ScreenSlot active={route === 'run_cost'}>
+        <RunCostScreen
+          onOpenDrawer={openDrawer}
+          isScreenFocused={route === 'run_cost'}
         />
       </ScreenSlot>
 
