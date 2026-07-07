@@ -92,6 +92,7 @@ function AppSession() {
         onComplete={() => {
           void refreshTriageMode();
           setOnboardingCompleteState(true);
+          setSessionStarted(true);
         }}
       />
     );

@@ -78,6 +78,10 @@ import {
   INBOX_QUICK_FILTERS,
   type InboxQuickFilter,
 } from '../utils/inboxFilters';
+import {
+  loadSeenFighterIntros,
+  markFighterIntroSeen,
+} from '../services/fighterIntroStorage';
 
 interface HomeScreenProps {
   onOpenDrawer: () => void;

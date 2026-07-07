@@ -137,6 +137,21 @@ export function playCharacterDeleteSound(characterId: CharacterId): Promise<void
   return playRetroSound(key);
 }
 
+/** Rapid Punch-Out style combo — every N inbox clears. */
+export function playTysonComboSound(): Promise<void> {
+  return runOnMainThread(async () => {
+    try {
+      await playSoundInternal('deletePunch', 0.92);
+      await new Promise((resolve) => setTimeout(resolve, 110));
+      await playSoundInternal('deletePunch', 0.96);
+      await new Promise((resolve) => setTimeout(resolve, 110));
+      await playSoundInternal('deletePunch', 1);
+    } catch (error) {
+      console.warn('[RetroSound] Tyson combo failed:', error);
+    }
+  });
+}
+
 /** Play the fighter intro sting once (no session bookkeeping). */
 export function playCharacterIntroSound(characterId: CharacterId): Promise<void> {
   const config =

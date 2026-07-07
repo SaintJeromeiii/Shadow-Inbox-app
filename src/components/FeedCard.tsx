@@ -66,7 +66,16 @@ interface FeedCardProps {
 
 function formatTimestamp(iso: string): string {
   const date = new Date(iso);
-  return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (!Number.isFinite(date.getTime())) {
+    return '';
+  }
+
+  return date.toLocaleString([], {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 }
 
 function formatCalendarPreviewTime(iso: string): string {

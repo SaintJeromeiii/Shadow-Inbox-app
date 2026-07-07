@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { playCharacterDeleteSound, playRetroSound, preloadRetroSounds } from '../services/retroSoundService';
+import { playCharacterDeleteSound, playRetroSound, playTysonComboSound, preloadRetroSounds } from '../services/retroSoundService';
 import ActionCompleteToast from '../components/ActionCompleteToast';
 import LevelUpFlash from '../components/LevelUpFlash';
 import { useCharacter } from './CharacterContext';
@@ -21,6 +21,8 @@ interface RetroFeedbackContextValue {
 
 const RetroFeedbackContext = createContext<RetroFeedbackContextValue | null>(null);
 
+const COMBO_DELETE_INTERVAL = 20;
+
 export function RetroFeedbackProvider({ children }: { children: ReactNode }) {
   const { characterId } = useCharacter();
   const [toastVisible, setToastVisible] = useState(false);
@@ -28,6 +30,7 @@ export function RetroFeedbackProvider({ children }: { children: ReactNode }) {
   const [levelUpVisible, setLevelUpVisible] = useState(false);
   const [levelUpTierName, setLevelUpTierName] = useState('');
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const deletionCountRef = useRef(0);
 
   const clearHideTimer = useCallback(() => {
     if (hideTimerRef.current) {
@@ -37,7 +40,12 @@ export function RetroFeedbackProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const playDeleteSound = useCallback(() => {
+    deletionCountRef.current += 1;
     void playCharacterDeleteSound(characterId);
+
+    if (deletionCountRef.current % COMBO_DELETE_INTERVAL === 0) {
+      void playTysonComboSound();
+    }
   }, [characterId]);
 
   const playSuccessSound = useCallback(() => {
