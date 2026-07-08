@@ -104,6 +104,24 @@ function buildMailPiece(round: number, combo: number): MailPiece {
   };
 }
 
+function getLaneConfig(lane: SortLane): LaneConfig {
+  return LANE_CONFIG.find((entry) => entry.key === lane) ?? LANE_CONFIG[0];
+}
+
+function MailLaneIcon({ lane }: { lane: SortLane }) {
+  const accent = getLaneConfig(lane).accent;
+
+  if (lane === 'priority') {
+    return <ArcadeCrosshairIcon size={18} color={accent} />;
+  }
+
+  if (lane === 'archive') {
+    return <ArcadeArchiveIcon size={18} color={accent} />;
+  }
+
+  return <ArcadeTrashIcon size={18} color={accent} />;
+}
+
 export function MailSorterDeluxeGame({ onBackToHub }: MailSorterDeluxeGameProps) {
   const insets = useSafeAreaInsets();
   const bottomPad = Math.max(insets.bottom, 16);
@@ -228,6 +246,8 @@ export function MailSorterDeluxeGame({ onBackToHub }: MailSorterDeluxeGameProps)
 
   const scoreTitle =
     score >= 3000 ? 'POSTMASTER GENERAL' : score >= 1800 ? 'SORTING SAVANT' : 'MAILROOM ROOKIE';
+  const laneConfig = mailPiece ? getLaneConfig(mailPiece.lane) : null;
+  const showHint = round <= 6 || combo < 4;
 
   return (
     <>
@@ -292,9 +312,37 @@ export function MailSorterDeluxeGame({ onBackToHub }: MailSorterDeluxeGameProps)
 
             <View style={styles.arena}>
               <View style={styles.scanLines} />
-              <View style={[styles.mailPiece, { top: `${fallPercent * 58}%` }]}>
-                <Text style={styles.mailSender}>{mailPiece?.sender}</Text>
+              <View
+                style={[
+                  styles.mailPiece,
+                  laneConfig
+                    ? {
+                        top: `${fallPercent * 58}%`,
+                        borderColor: laneConfig.accent,
+                        backgroundColor:
+                          laneConfig.key === 'priority'
+                            ? 'rgba(255, 224, 102, 0.14)'
+                            : laneConfig.key === 'archive'
+                              ? 'rgba(51, 255, 255, 0.12)'
+                              : 'rgba(255, 102, 204, 0.14)',
+                      }
+                    : { top: `${fallPercent * 58}%` },
+                ]}
+              >
+                <View style={styles.mailHeaderRow}>
+                  {mailPiece ? <MailLaneIcon lane={mailPiece.lane} /> : null}
+                  <Text style={[styles.mailSender, laneConfig ? { color: laneConfig.accent } : null]}>
+                    {mailPiece?.sender}
+                  </Text>
+                </View>
                 <Text style={styles.mailSubject}>{mailPiece?.subject}</Text>
+                {mailPiece && showHint ? (
+                  <View style={styles.mailHintRow}>
+                    <Text style={[styles.mailHintLabel, { color: laneConfig?.accent ?? arcadeColors.textMuted }]}>
+                      ROUTE TO {laneConfig?.label}
+                    </Text>
+                  </View>
+                ) : null}
               </View>
             </View>
 
@@ -519,6 +567,11 @@ const styles = StyleSheet.create({
     padding: 14,
     gap: 6,
   },
+  mailHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   mailSender: {
     fontFamily: arcadeFonts.pixel,
     fontSize: 7,
@@ -527,6 +580,21 @@ const styles = StyleSheet.create({
   },
   mailSubject: {
     ...arcadeTypography.retroBodyBright,
+  },
+  mailHintRow: {
+    marginTop: 2,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: arcadeColors.borderMuted,
+    backgroundColor: arcadeColors.bgPanelElevated,
+  },
+  mailHintLabel: {
+    fontFamily: arcadeFonts.pixel,
+    fontSize: 6,
+    lineHeight: 10,
   },
   controlsRow: {
     flexDirection: 'row',
