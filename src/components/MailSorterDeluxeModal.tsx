@@ -2,11 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal,
   Pressable,
-  SafeAreaView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import {
   arcadeButtonPrimary,
@@ -23,6 +23,10 @@ type GamePhase = 'intro' | 'playing' | 'results';
 interface MailSorterDeluxeModalProps {
   visible: boolean;
   onClose: () => void;
+}
+
+interface MailSorterDeluxeGameProps {
+  onBackToHub: () => void;
 }
 
 interface MailPiece {
@@ -77,29 +81,32 @@ function pickRandom<T>(items: T[]): T {
   return items[Math.floor(Math.random() * items.length)];
 }
 
-function buildMailPiece(round: number): MailPiece {
+/** Base fall duration (ms). Combo + round shave time off as the player heats up. */
+function computePieceTimeLimitMs(round: number, combo: number): number {
+  const baseMs = 5200;
+  const comboReduction = Math.min(combo * 140, 2600);
+  const roundReduction = Math.min(Math.max(0, round - 1) * 45, 1100);
+  const jitter = Math.floor(Math.random() * 320) - 160;
+
+  return Math.max(1600, baseMs - comboReduction - roundReduction + jitter);
+}
+
+function buildMailPiece(round: number, combo: number): MailPiece {
   const lane = pickRandom<SortLane>(['priority', 'archive', 'trash']);
   const picked = pickRandom(MAIL_POOL[lane]);
-  const speedFloor = Math.max(1100, 2300 - round * 35);
-  const speedCeiling = Math.max(speedFloor + 250, 3000 - round * 20);
 
   return {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     sender: picked.sender,
     subject: picked.subject,
     lane,
-    timeLimitMs: speedFloor + Math.floor(Math.random() * (speedCeiling - speedFloor)),
+    timeLimitMs: computePieceTimeLimitMs(round, combo),
   };
 }
 
-function laneLabel(lane: SortLane): string {
-  return LANE_CONFIG.find((entry) => entry.key === lane)?.label ?? lane.toUpperCase();
-}
-
-export default function MailSorterDeluxeModal({
-  visible,
-  onClose,
-}: MailSorterDeluxeModalProps) {
+export function MailSorterDeluxeGame({ onBackToHub }: MailSorterDeluxeGameProps) {
+  const insets = useSafeAreaInsets();
+  const bottomPad = Math.max(insets.bottom, 16);
   const [phase, setPhase] = useState<GamePhase>('intro');
   const [score, setScore] = useState(0);
   const [combo, setCombo] = useState(0);
@@ -112,8 +119,8 @@ export default function MailSorterDeluxeModal({
 
   const pieceTimeLimitRef = useRef(0);
 
-  const spawnPiece = useCallback((nextRound: number) => {
-    const next = buildMailPiece(nextRound);
+  const spawnPiece = useCallback((nextRound: number, currentCombo = 0) => {
+    const next = buildMailPiece(nextRound, currentCombo);
     pieceTimeLimitRef.current = next.timeLimitMs;
     setMailPiece(next);
     setPieceTimeLeftMs(next.timeLimitMs);
@@ -141,18 +148,15 @@ export default function MailSorterDeluxeModal({
 
       const nextRound = round + 1;
       setRound(nextRound);
-      spawnPiece(nextRound);
+      spawnPiece(nextRound, 0);
       return currentLives - 1;
     });
   }, [round, spawnPiece]);
 
   useEffect(() => {
-    if (!visible) {
-      setPhase('intro');
-      setMailPiece(null);
-      return;
-    }
-  }, [visible]);
+    setPhase('intro');
+    setMailPiece(null);
+  }, []);
 
   useEffect(() => {
     if (phase !== 'playing') {
@@ -198,7 +202,7 @@ export default function MailSorterDeluxeModal({
         setCombo(nextCombo);
         setBestCombo((current) => Math.max(current, nextCombo));
         setRound(nextRound);
-        spawnPiece(nextRound);
+        spawnPiece(nextRound, nextCombo);
         await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         return;
       }
@@ -226,20 +230,9 @@ export default function MailSorterDeluxeModal({
     score >= 3000 ? 'POSTMASTER GENERAL' : score >= 1800 ? 'SORTING SAVANT' : 'MAILROOM ROOKIE';
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.kicker}>INBOX ZERO BONUS STAGE</Text>
-            <Text style={styles.title}>MAIL SORTER DELUXE</Text>
-          </View>
-          <Pressable onPress={onClose} style={styles.closeButton}>
-            <Text style={styles.closeText}>EXIT</Text>
-          </Pressable>
-        </View>
-
+    <>
         {phase === 'intro' ? (
-          <View style={styles.content}>
+          <View style={[styles.content, { paddingBottom: bottomPad }]}>
             <View style={styles.heroCard}>
               <Text style={styles.heroTitle}>Neon mailroom unlocked.</Text>
               <Text style={styles.heroBody}>
@@ -266,7 +259,7 @@ export default function MailSorterDeluxeModal({
               <Text style={styles.rulesTitle}>How to play</Text>
               <Text style={styles.ruleLine}>45-second bonus stage</Text>
               <Text style={styles.ruleLine}>3 lives</Text>
-              <Text style={styles.ruleLine}>Correct streaks increase your combo score</Text>
+              <Text style={styles.ruleLine}>Correct streaks boost score and speed up the belt</Text>
               <Text style={styles.ruleLine}>Wrong bins or dropped mail cost a life</Text>
             </View>
 
@@ -277,7 +270,7 @@ export default function MailSorterDeluxeModal({
         ) : null}
 
         {phase === 'playing' ? (
-          <View style={styles.content}>
+          <View style={[styles.content, styles.playingContent, { paddingBottom: bottomPad }]}>
             <View style={styles.scoreboard}>
               <View style={styles.scoreCell}>
                 <Text style={styles.scoreLabel}>SCORE</Text>
@@ -299,10 +292,9 @@ export default function MailSorterDeluxeModal({
 
             <View style={styles.arena}>
               <View style={styles.scanLines} />
-              <View style={[styles.mailPiece, { top: `${fallPercent * 72}%` }]}>
+              <View style={[styles.mailPiece, { top: `${fallPercent * 58}%` }]}>
                 <Text style={styles.mailSender}>{mailPiece?.sender}</Text>
                 <Text style={styles.mailSubject}>{mailPiece?.subject}</Text>
-                <Text style={styles.mailHint}>Route to {laneLabel(mailPiece?.lane ?? 'archive')}</Text>
               </View>
             </View>
 
@@ -321,7 +313,7 @@ export default function MailSorterDeluxeModal({
         ) : null}
 
         {phase === 'results' ? (
-          <View style={styles.content}>
+          <View style={[styles.content, { paddingBottom: bottomPad }]}>
             <View style={styles.resultsCard}>
               <Text style={styles.resultsKicker}>SHIFT COMPLETE</Text>
               <Text style={styles.resultsTitle}>{scoreTitle}</Text>
@@ -336,12 +328,33 @@ export default function MailSorterDeluxeModal({
               <Pressable style={styles.secondaryButton} onPress={resetGame}>
                 <Text style={styles.secondaryButtonText}>PLAY AGAIN</Text>
               </Pressable>
-              <Pressable style={styles.ghostButton} onPress={onClose}>
-                <Text style={styles.ghostButtonText}>BACK TO STAGE</Text>
+              <Pressable style={styles.ghostButton} onPress={onBackToHub}>
+                <Text style={styles.ghostButtonText}>BACK TO ARCADE</Text>
               </Pressable>
             </View>
           </View>
         ) : null}
+    </>
+  );
+}
+
+export default function MailSorterDeluxeModal({
+  visible,
+  onClose,
+}: MailSorterDeluxeModalProps) {
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.kicker}>INBOX ZERO BONUS STAGE</Text>
+            <Text style={styles.title}>MAIL SORTER DELUXE</Text>
+          </View>
+          <Pressable onPress={onClose} style={styles.closeButton}>
+            <Text style={styles.closeText}>EXIT</Text>
+          </Pressable>
+        </View>
+        <MailSorterDeluxeGame onBackToHub={onClose} />
       </SafeAreaView>
     </Modal>
   );
@@ -382,8 +395,12 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingTop: 12,
     gap: 16,
+  },
+  playingContent: {
+    paddingBottom: 0,
   },
   heroCard: {
     ...arcadeCard('pink'),
@@ -510,10 +527,6 @@ const styles = StyleSheet.create({
   },
   mailSubject: {
     ...arcadeTypography.retroBodyBright,
-  },
-  mailHint: {
-    ...arcadeTypography.retroCaption,
-    color: arcadeColors.textMuted,
   },
   controlsRow: {
     flexDirection: 'row',

@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import MailSorterDeluxeModal from '../components/MailSorterDeluxeModal';
+import InboxZeroBonusHub from '../components/InboxZeroBonusHub';
 import SwipeableFeedCard from '../components/SwipeableFeedCard';
 import {
   triageNotifications,
@@ -202,7 +202,7 @@ export default function HomeScreen({
   const [syncSummary, setSyncSummary] = useState<string | null>(null);
   const [pushBannerDismissed, setPushBannerDismissed] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [mailSorterVisible, setMailSorterVisible] = useState(false);
+  const [bonusHubVisible, setBonusHubVisible] = useState(false);
   const [inboxSwipeSettings, setInboxSwipeSettings] = useState<InboxSwipeSettings>({
     swipeLeft: 'trash',
     swipeRight: 'archive',
@@ -1507,9 +1507,9 @@ export default function HomeScreen({
             styles.emptyBonusButton,
             pressed && styles.emptyBonusButtonPressed,
           ]}
-          onPress={() => setMailSorterVisible(true)}
+          onPress={() => setBonusHubVisible(true)}
         >
-          <Text style={styles.emptyBonusButtonText}>UNLOCK MAIL SORTER DELUXE</Text>
+          <Text style={styles.emptyBonusButtonText}>PLAY BONUS GAMES</Text>
         </Pressable>
       ) : null}
     </View>
@@ -1796,9 +1796,9 @@ export default function HomeScreen({
       />
       </BossLevelPulseFrame>
 
-      <MailSorterDeluxeModal
-        visible={mailSorterVisible}
-        onClose={() => setMailSorterVisible(false)}
+      <InboxZeroBonusHub
+        visible={bonusHubVisible}
+        onClose={() => setBonusHubVisible(false)}
       />
 
       {showBulkSend && (
