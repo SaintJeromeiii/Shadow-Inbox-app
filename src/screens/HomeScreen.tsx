@@ -1483,11 +1483,13 @@ export default function HomeScreen({
       subtitle = 'No open cases — inbox zero for now.';
     }
 
-    const hasConnectedInbox = activeProfile.oauth || accounts.some((account) => account.oauth);
+    const hasLiveInbox = Boolean(
+      (activeProfile.oauth || activeProfile.imapConfigured) && !activeProfile.mockOnly,
+    );
     const shouldShowWaitingGame =
       activeTab === 'action_required' &&
       hasActiveAccount &&
-      hasConnectedInbox &&
+      hasLiveInbox &&
       !syncError &&
       !processing &&
       !isInboxFiltered &&
