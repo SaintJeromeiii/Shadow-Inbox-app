@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import MailSorterDeluxeModal from '../components/MailSorterDeluxeModal';
 import SwipeableFeedCard from '../components/SwipeableFeedCard';
 import {
   triageNotifications,
@@ -201,6 +202,7 @@ export default function HomeScreen({
   const [syncSummary, setSyncSummary] = useState<string | null>(null);
   const [pushBannerDismissed, setPushBannerDismissed] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [mailSorterVisible, setMailSorterVisible] = useState(false);
   const [inboxSwipeSettings, setInboxSwipeSettings] = useState<InboxSwipeSettings>({
     swipeLeft: 'trash',
     swipeRight: 'archive',
@@ -864,6 +866,16 @@ export default function HomeScreen({
 
   const activeFolderCount = tabCounts[activeTab];
   const activeFolderLabel = TABS.find((tab) => tab.key === activeTab)?.label ?? 'STAGE';
+  const showInboxZeroBonus =
+    hydrated &&
+    hasActiveAccount &&
+    activeTab === 'action_required' &&
+    activeFolderCount === 0 &&
+    unreadCount === 0 &&
+    !processing &&
+    !syncError &&
+    !isInboxFiltered &&
+    Boolean(activeProfile.oauth);
   const stageDifficulty = useMemo(
     () => getStageDifficulty(activeFolderCount),
     [activeFolderCount],
@@ -1489,6 +1501,17 @@ export default function HomeScreen({
       </View>
       <Text style={styles.emptyTitle}>{title}</Text>
       <Text style={styles.emptySubtitle}>{subtitle}</Text>
+      {showInboxZeroBonus ? (
+        <Pressable
+          style={({ pressed }) => [
+            styles.emptyBonusButton,
+            pressed && styles.emptyBonusButtonPressed,
+          ]}
+          onPress={() => setMailSorterVisible(true)}
+        >
+          <Text style={styles.emptyBonusButtonText}>UNLOCK MAIL SORTER DELUXE</Text>
+        </Pressable>
+      ) : null}
     </View>
     );
   };
@@ -1772,6 +1795,11 @@ export default function HomeScreen({
         }
       />
       </BossLevelPulseFrame>
+
+      <MailSorterDeluxeModal
+        visible={mailSorterVisible}
+        onClose={() => setMailSorterVisible(false)}
+      />
 
       {showBulkSend && (
         <View style={[styles.bulkBar, { paddingBottom: bulkBarBottomPad }]}>
@@ -2395,5 +2423,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
     lineHeight: 20,
+  },
+  emptyBonusButton: {
+    marginTop: 22,
+    borderWidth: 2,
+    borderColor: arcadeColors.borderPink,
+    borderRadius: 10,
+    backgroundColor: arcadeColors.bgPanel,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+  },
+  emptyBonusButtonPressed: {
+    opacity: 0.82,
+  },
+  emptyBonusButtonText: {
+    fontFamily: arcadeFonts.pixel,
+    fontSize: 7,
+    lineHeight: 11,
+    color: arcadeColors.neonPink,
+    textAlign: 'center',
   },
 });
