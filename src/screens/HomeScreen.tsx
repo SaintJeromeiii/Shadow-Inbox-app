@@ -64,6 +64,7 @@ import PlayerAvatarCard from '../components/PlayerAvatarCard';
 import IconLegendMinimap from '../components/IconLegendMinimap';
 import StageDifficultyBanner from '../components/StageDifficultyBanner';
 import BossLevelPulseFrame from '../components/BossLevelPulseFrame';
+import RetroInboxWaitingGame from '../components/RetroInboxWaitingGame';
 import { fetchPlayerStats, recordPlayerDeletion } from '../services/userProgressService';
 import { saveLocalCharacterDeletions } from '../services/characterProgressStorage';
 import type { PlayerStats } from '../types/userProgress';
@@ -1482,14 +1483,37 @@ export default function HomeScreen({
       subtitle = 'No open cases — inbox zero for now.';
     }
 
+    const hasLiveInbox = Boolean(
+      (activeProfile.oauth || activeProfile.imapConfigured) && !activeProfile.mockOnly,
+    );
+    const shouldShowWaitingGame =
+      activeTab === 'action_required' &&
+      hasActiveAccount &&
+      hasLiveInbox &&
+      !syncError &&
+      !processing &&
+      !isInboxFiltered &&
+      unreadCount === 0;
+
+    if (shouldShowWaitingGame) {
+      return (
+        <RetroInboxWaitingGame
+          title={title}
+          subtitle="No unread inbox signals right now. Play while Shadow Inbox scans for the next one."
+          lastCheckedLabel={`Last checked: ${lastCheckedLabel}`}
+          refreshing={refreshing}
+        />
+      );
+    }
+
     return (
-    <View style={styles.emptyState}>
-      <View style={styles.emptyIconWrap}>
-        <Ionicons name="mail-open-outline" size={44} color="#3D4A63" />
+      <View style={styles.emptyState}>
+        <View style={styles.emptyIconWrap}>
+          <Ionicons name="mail-open-outline" size={44} color="#3D4A63" />
+        </View>
+        <Text style={styles.emptyTitle}>{title}</Text>
+        <Text style={styles.emptySubtitle}>{subtitle}</Text>
       </View>
-      <Text style={styles.emptyTitle}>{title}</Text>
-      <Text style={styles.emptySubtitle}>{subtitle}</Text>
-    </View>
     );
   };
 
