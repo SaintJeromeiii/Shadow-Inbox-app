@@ -81,6 +81,7 @@ import InboxSearchBar from '../components/InboxSearchBar';
 import {
   filterInboxNotifications,
   INBOX_QUICK_FILTERS,
+  isCurrentlySnoozed,
   type InboxQuickFilter,
 } from '../utils/inboxFilters';
 import {
@@ -96,7 +97,20 @@ interface HomeScreenProps {
   isScreenFocused?: boolean;
 }
 
+type UndoableActionType = 'archive' | 'trash' | 'snooze';
+
+interface PendingUndoAction {
+  id: string;
+  type: UndoableActionType;
+  label: string;
+  items: TriagedNotification[];
+  emailIds?: string[];
+  localOnlyCount?: number;
+  totalRemoved?: number;
+}
+
 const HOME_PLAYER_STATS_CACHE_MS = 30_000;
+const UNDO_WINDOW_MS = 5000;
 
 const TABS: { key: FeedTab; label: string }[] = [
   { key: 'action_required', label: 'OPEN CASES' },
@@ -123,6 +137,41 @@ function buildDraftMap(notifications: TriagedNotification[]): Record<string, str
     }
   }
   return drafts;
+}
+
+function normalizeSnoozedNotifications(
+  notifications: TriagedNotification[],
+): TriagedNotification[] {
+  const now = Date.now();
+  let changed = false;
+
+  const normalized = notifications.map((notification) => {
+    const snoozedUntilMs = notification.snoozedUntil
+      ? new Date(notification.snoozedUntil).getTime()
+      : NaN;
+    const snoozeExpired = Number.isFinite(snoozedUntilMs) && snoozedUntilMs <= now;
+
+    if (snoozeExpired) {
+      changed = true;
+      return {
+        ...notification,
+        snoozedUntil: null,
+        resurfacedFromSnooze: true,
+      };
+    }
+
+    if (notification.resurfacedFromSnooze && !notification.snoozedUntil) {
+      changed = true;
+      return {
+        ...notification,
+        resurfacedFromSnooze: false,
+      };
+    }
+
+    return notification;
+  });
+
+  return changed ? normalized : notifications;
 }
 
 function formatLastChecked(date: Date | null): string {
@@ -203,6 +252,7 @@ export default function HomeScreen({
   const [pushBannerDismissed, setPushBannerDismissed] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [bonusHubVisible, setBonusHubVisible] = useState(false);
+  const [pendingUndoAction, setPendingUndoAction] = useState<PendingUndoAction | null>(null);
   const [inboxSwipeSettings, setInboxSwipeSettings] = useState<InboxSwipeSettings>({
     swipeLeft: 'trash',
     swipeRight: 'archive',
@@ -210,6 +260,8 @@ export default function HomeScreen({
   const [quickFilter, setQuickFilter] = useState<InboxQuickFilter>('all');
   const [seenFighterIntros, setSeenFighterIntros] = useState<Set<string>>(new Set());
   const foregroundSyncRef = useRef(false);
+  const pendingUndoTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingUndoActionRef = useRef<PendingUndoAction | null>(null);
   const insets = useSafeAreaInsets();
 
   const dataSource = getNotificationDataSource(activeAccount);
@@ -531,14 +583,15 @@ export default function HomeScreen({
       loadingAccountRef.current = accountKey;
 
       const publishInbox = (merged: TriagedNotification[]) => {
-        setNotifications(merged);
-        setDraftTexts(buildDraftMap(merged));
+        const normalized = normalizeSnoozedNotifications(merged);
+        setNotifications(normalized);
+        setDraftTexts(buildDraftMap(normalized));
         setRemovingIds(new Set());
         setProcessing(false);
         setProgress(null);
         setLastUpdated(new Date());
         setHydrated(true);
-        return merged;
+        return normalized;
       };
 
       try {
@@ -806,6 +859,11 @@ export default function HomeScreen({
     });
   }, [tabFilteredNotifications, searchQuery, quickFilter]);
 
+  const snoozedCount = useMemo(
+    () => notifications.filter((item) => isCurrentlySnoozed(item)).length,
+    [notifications],
+  );
+
   const isInboxFiltered =
     searchQuery.trim().length > 0 || quickFilter !== 'all';
 
@@ -963,6 +1021,19 @@ export default function HomeScreen({
     });
   }, []);
 
+  const clearPendingUndoTimer = useCallback(() => {
+    if (pendingUndoTimeoutRef.current) {
+      clearTimeout(pendingUndoTimeoutRef.current);
+      pendingUndoTimeoutRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      clearPendingUndoTimer();
+    };
+  }, [clearPendingUndoTimer]);
+
   const syncEmailDeletion = useCallback(
     (
       emailIds: string[],
@@ -1006,6 +1077,58 @@ export default function HomeScreen({
     },
     [applyLocalDeletion, applyPlayerStats, restoreNotificationsToFeed],
   );
+
+  const finalizePendingUndoAction = useCallback(
+    (action?: PendingUndoAction | null) => {
+      const target = action ?? pendingUndoActionRef.current;
+      if (!target) {
+        return;
+      }
+
+      clearPendingUndoTimer();
+      pendingUndoActionRef.current = null;
+      setPendingUndoAction((current) => (current?.id === target.id ? null : current));
+
+      if (target.type === 'snooze') {
+        return;
+      }
+
+      syncEmailDeletion(
+        target.emailIds ?? [],
+        target.type,
+        target.items,
+        {
+          totalRemoved: target.totalRemoved ?? target.items.length,
+          localOnlyCount: target.localOnlyCount ?? 0,
+        },
+      );
+    },
+    [clearPendingUndoTimer, syncEmailDeletion],
+  );
+
+  const queueUndoableAction = useCallback(
+    (action: PendingUndoAction) => {
+      finalizePendingUndoAction();
+      pendingUndoActionRef.current = action;
+      setPendingUndoAction(action);
+      pendingUndoTimeoutRef.current = setTimeout(() => {
+        finalizePendingUndoAction(action);
+      }, UNDO_WINDOW_MS);
+    },
+    [finalizePendingUndoAction],
+  );
+
+  const handleUndoLastAction = useCallback(() => {
+    const target = pendingUndoActionRef.current;
+    if (!target) {
+      return;
+    }
+
+    clearPendingUndoTimer();
+    pendingUndoActionRef.current = null;
+    setPendingUndoAction(null);
+    restoreNotificationsToFeed(target.items);
+  }, [clearPendingUndoTimer, restoreNotificationsToFeed]);
 
   const handleDraftChange = useCallback((id: string, text: string) => {
     setDraftTexts((prev) => ({ ...prev, [id]: text }));
@@ -1062,6 +1185,7 @@ export default function HomeScreen({
         <View style={styles.quickFilterRow}>
           {INBOX_QUICK_FILTERS.map((chip) => {
             const active = quickFilter === chip.key;
+            const label = chip.key === 'snoozed' ? `${chip.label} (${snoozedCount})` : chip.label;
             return (
               <Pressable
                 key={chip.key}
@@ -1074,7 +1198,7 @@ export default function HomeScreen({
                     active && styles.quickFilterChipTextActive,
                   ]}
                 >
-                  {chip.label}
+                  {label}
                 </Text>
               </Pressable>
             );
@@ -1127,6 +1251,7 @@ export default function HomeScreen({
       handleFighterIntroComplete,
       searchQuery,
       quickFilter,
+      snoozedCount,
       filteredNotifications.length,
       isInboxFiltered,
     ],
@@ -1192,19 +1317,31 @@ export default function HomeScreen({
       playDeleteSound();
 
       if (notification.sourceApp !== 'Email') {
-        await applyLocalDeletion(1);
+        queueUndoableAction({
+          id: `${notification.id}-archive`,
+          type: 'archive',
+          label: 'Archived',
+          items: [notification],
+          emailIds: [],
+          localOnlyCount: 1,
+          totalRemoved: 1,
+        });
         return;
       }
 
-      syncEmailDeletion([notification.id], 'archive', [notification], {
+      queueUndoableAction({
+        id: `${notification.id}-archive`,
+        type: 'archive',
+        label: 'Archived',
+        items: [notification],
+        emailIds: [notification.id],
         totalRemoved: 1,
       });
     },
     [
       removeNotificationsFromFeed,
       playDeleteSound,
-      applyLocalDeletion,
-      syncEmailDeletion,
+      queueUndoableAction,
     ],
   );
 
@@ -1214,20 +1351,57 @@ export default function HomeScreen({
       playDeleteSound();
 
       if (notification.sourceApp !== 'Email') {
-        await applyLocalDeletion(1);
+        queueUndoableAction({
+          id: `${notification.id}-trash`,
+          type: 'trash',
+          label: 'Trashed',
+          items: [notification],
+          emailIds: [],
+          localOnlyCount: 1,
+          totalRemoved: 1,
+        });
         return;
       }
 
-      syncEmailDeletion([notification.id], 'trash', [notification], {
+      queueUndoableAction({
+        id: `${notification.id}-trash`,
+        type: 'trash',
+        label: 'Trashed',
+        items: [notification],
+        emailIds: [notification.id],
         totalRemoved: 1,
       });
     },
     [
       removeNotificationsFromFeed,
       playDeleteSound,
-      applyLocalDeletion,
-      syncEmailDeletion,
+      queueUndoableAction,
     ],
+  );
+
+  const handleSnooze = useCallback(
+    async (notification: TriagedNotification, snoozedUntil: string) => {
+      animateListChange();
+      setNotifications((prev) =>
+        prev.map((item) =>
+          item.id === notification.id
+            ? {
+                ...item,
+                snoozedUntil,
+                resurfacedFromSnooze: false,
+              }
+            : item,
+        ),
+      );
+      queueUndoableAction({
+        id: `${notification.id}-snooze`,
+        type: 'snooze',
+        label: 'Snoozed',
+        items: [notification],
+      });
+      showActionComplete('SNOOZED');
+    },
+    [queueUndoableAction, showActionComplete],
   );
 
   const handleBulkTrash = useCallback(async () => {
@@ -1479,6 +1653,9 @@ export default function HomeScreen({
 
     if (processing) {
       subtitle = 'AI is sorting your inbox…';
+    } else if (quickFilter === 'snoozed') {
+      title = 'No snoozed mail';
+      subtitle = 'Messages you snooze will reappear here until they are due.';
     } else if (isInboxFiltered && tabFilteredNotifications.length > 0) {
       title = 'No matches';
       subtitle = 'Try a different search term or clear the quick filter.';
@@ -1771,6 +1948,7 @@ export default function HomeScreen({
             voiceControl={feedVoiceControl}
             onGmailArchive={handleGmailArchive}
             onTrash={handleTrash}
+            onSnooze={handleSnooze}
             onSendReply={handleSendReply}
             isRemoving={removingIds.has(item.id)}
             actionBusy={bulkSending || bulkActionBusy}
@@ -1800,6 +1978,27 @@ export default function HomeScreen({
         visible={bonusHubVisible}
         onClose={() => setBonusHubVisible(false)}
       />
+
+      {pendingUndoAction ? (
+        <View
+          style={[
+            styles.undoBar,
+            {
+              bottom:
+                selectionMode
+                  ? 86 + selectionBarBottomPad
+                  : showBulkSend
+                    ? 42 + bulkBarBottomPad
+                    : Math.max(insets.bottom, 16),
+            },
+          ]}
+        >
+          <Text style={styles.undoBarText}>{pendingUndoAction.label}. Undo?</Text>
+          <Pressable style={styles.undoButton} onPress={handleUndoLastAction}>
+            <Text style={styles.undoButtonText}>UNDO</Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       {showBulkSend && (
         <View style={[styles.bulkBar, { paddingBottom: bulkBarBottomPad }]}>
@@ -2186,6 +2385,45 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 8,
     elevation: 12,
+  },
+  undoBar: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: arcadeRadii.sm,
+    borderWidth: 2,
+    borderColor: 'rgba(255, 224, 102, 0.55)',
+    backgroundColor: 'rgba(10, 16, 28, 0.98)',
+    shadowColor: arcadeColors.neonYellow,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.28,
+    shadowRadius: 8,
+    elevation: 10,
+  },
+  undoBarText: {
+    flex: 1,
+    color: arcadeColors.textPrimary,
+    fontSize: 11,
+    fontFamily: arcadeFonts.pixel,
+  },
+  undoButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: arcadeRadii.sm,
+    borderWidth: 1,
+    borderColor: arcadeColors.neonYellow,
+    backgroundColor: 'rgba(255, 224, 102, 0.10)',
+  },
+  undoButtonText: {
+    color: arcadeColors.neonYellow,
+    fontSize: 10,
+    fontFamily: arcadeFonts.pixel,
   },
   bulkButton: {
     flexDirection: 'row',

@@ -81,14 +81,54 @@ function summarizeLocally(notification: RawNotification, fallback?: string): str
   return cleaned.length < firstLine.length ? `${cleaned}…` : cleaned;
 }
 
+function inferReasonLabel(notification: RawNotification, triage: TriageResult): string {
+  const text = notification.rawText.toLowerCase();
+  const sender = notification.sender.toLowerCase();
+
+  if (
+    /invoice|billing|payment|receipt|charge|refund/.test(text) ||
+    /billing|accounts|finance/.test(sender)
+  ) {
+    return 'Billing';
+  }
+
+  if (/calendar|schedule|meeting|reschedule|availability/.test(text)) {
+    return 'Calendar';
+  }
+
+  if (/urgent|asap|eod|deadline|today|immediately|blocking/.test(text) || triage.urgencyScore >= 8) {
+    return 'Deadline';
+  }
+
+  if (
+    /reply needed|please respond|follow[- ]?up|need your input|can you review|action required/.test(text) ||
+    triage.category === 'action_required'
+  ) {
+    return 'Reply needed';
+  }
+
+  if (/noreply|newsletter|digest|bot|notifications?/.test(sender) || triage.category === 'ignore') {
+    return 'Automated';
+  }
+
+  return 'Human sender';
+}
+
+function enrichTriageResult(notification: RawNotification, triage: TriageResult): TriageResult {
+  return {
+    ...triage,
+    reasonLabel: triage.reasonLabel ?? inferReasonLabel(notification, triage),
+  };
+}
+
 function simulateTriage(notification: RawNotification): TriageResult {
   if (shouldForceActionRequired(notification)) {
-    return {
+    return enrichTriageResult(notification, {
       category: 'action_required',
       cleanSummary: summarizeLocally(notification),
       suggestedReply: draftReply(notification),
       urgencyScore: /\btest\b/i.test(notification.rawText) ? 8 : 7,
-    };
+    });
   }
 
   const text = notification.rawText.toLowerCase();
@@ -102,32 +142,32 @@ function simulateTriage(notification: RawNotification): TriageResult {
     !text.includes('action');
 
   if (isVerification || isSpam) {
-    return {
+    return enrichTriageResult(notification, {
       category: 'ignore',
       cleanSummary: summarizeLocally(notification, 'Automated or low-priority message.'),
       suggestedReply: null,
       urgencyScore: 1,
-    };
+    });
   }
 
   const needsAction =
     /action required|can you review|blocking|eod|please respond/.test(text);
 
   if (needsAction) {
-    return {
+    return enrichTriageResult(notification, {
       category: 'action_required',
       cleanSummary: summarizeLocally(notification),
       suggestedReply: draftReply(notification),
       urgencyScore: text.includes('blocking') || text.includes('eod') ? 9 : 7,
-    };
+    });
   }
 
-  return {
+  return enrichTriageResult(notification, {
     category: 'fyi',
     cleanSummary: summarizeLocally(notification),
     suggestedReply: null,
     urgencyScore: 2,
-  };
+  });
 }
 
 async function triageBatchOnServer(
@@ -182,7 +222,7 @@ export async function triageNotification(
     const results = await triageBatchOnServer([notification]);
     const triage = results.get(notification.id);
     if (triage) {
-      return triage;
+      return enrichTriageResult(notification, triage);
     }
   } catch (error) {
     console.warn('[Shadow Inbox] Server triage failed, using simulation:', error);
@@ -203,8 +243,11 @@ export async function triageNotifications(
 
     try {
       const chunkResults = await triageBatchOnServer(chunk);
-      for (const [id, triage] of chunkResults.entries()) {
-        results.set(id, triage);
+      for (const notification of chunk) {
+        const triage = chunkResults.get(notification.id);
+        if (triage) {
+          results.set(notification.id, enrichTriageResult(notification, triage));
+        }
       }
       } catch (error) {
         const isLimit =

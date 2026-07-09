@@ -45,6 +45,11 @@ interface SettingsScreenProps {
 }
 
 const PRIVACY_URL = `${getRelayUrl()}/docs/privacy.html`;
+const SWIPE_ACTION_OPTIONS: InboxSwipeAction[] = ['archive', 'trash', 'snooze'];
+
+function formatSwipeActionLabel(action: InboxSwipeAction): string {
+  return action === 'archive' ? 'ARCHIVE' : action === 'trash' ? 'TRASH' : 'SNOOZE';
+}
 
 export default function SettingsScreen({
   visible,
@@ -291,7 +296,7 @@ export default function SettingsScreen({
 
             <Text style={styles.fieldLabel}>SWIPE LEFT</Text>
             <View style={styles.segmentRow}>
-              {(['trash', 'archive'] as InboxSwipeAction[]).map((action) => (
+              {SWIPE_ACTION_OPTIONS.map((action) => (
                 <Pressable
                   key={`left-${action}`}
                   style={[
@@ -306,7 +311,7 @@ export default function SettingsScreen({
                       inboxSwipeSettings.swipeLeft === action && styles.segmentButtonTextActive,
                     ]}
                   >
-                    {action === 'trash' ? 'TRASH' : 'ARCHIVE'}
+                    {formatSwipeActionLabel(action)}
                   </Text>
                 </Pressable>
               ))}
@@ -314,7 +319,7 @@ export default function SettingsScreen({
 
             <Text style={styles.fieldLabel}>SWIPE RIGHT</Text>
             <View style={styles.segmentRow}>
-              {(['archive', 'trash'] as InboxSwipeAction[]).map((action) => (
+              {SWIPE_ACTION_OPTIONS.map((action) => (
                 <Pressable
                   key={`right-${action}`}
                   style={[
@@ -329,7 +334,7 @@ export default function SettingsScreen({
                       inboxSwipeSettings.swipeRight === action && styles.segmentButtonTextActive,
                     ]}
                   >
-                    {action === 'trash' ? 'TRASH' : 'ARCHIVE'}
+                    {formatSwipeActionLabel(action)}
                   </Text>
                 </Pressable>
               ))}

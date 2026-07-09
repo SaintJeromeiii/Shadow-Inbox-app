@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export type InboxSwipeAction = 'archive' | 'trash';
+export type InboxSwipeAction = 'archive' | 'trash' | 'snooze';
 
 export interface InboxSwipeSettings {
   swipeLeft: InboxSwipeAction;
@@ -15,7 +15,7 @@ export const DEFAULT_INBOX_SWIPE_SETTINGS: InboxSwipeSettings = {
 };
 
 function isSwipeAction(value: unknown): value is InboxSwipeAction {
-  return value === 'archive' || value === 'trash';
+  return value === 'archive' || value === 'trash' || value === 'snooze';
 }
 
 export async function loadInboxSwipeSettings(): Promise<InboxSwipeSettings> {

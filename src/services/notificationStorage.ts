@@ -74,6 +74,8 @@ function mergeWithSeed(
       ...seedItem,
       triage: saved.triage ?? seedItem.triage,
       archived: saved.archived,
+      snoozedUntil: saved.snoozedUntil,
+      resurfacedFromSnooze: saved.resurfacedFromSnooze,
       shadowLabels: saved.shadowLabels ?? seedItem.shadowLabels,
       gmailMessageId: saved.gmailMessageId ?? seedItem.gmailMessageId,
       messageIdHeader: saved.messageIdHeader ?? seedItem.messageIdHeader,

@@ -91,6 +91,7 @@ export interface TriageResult {
   cleanSummary: string;
   suggestedReply: string | null;
   urgencyScore: number;
+  reasonLabel?: string;
   actionItems?: Array<{
     title: string;
     project?: string;
@@ -101,6 +102,8 @@ export interface TriageResult {
 export interface TriagedNotification extends RawNotification {
   triage?: TriageResult;
   archived?: boolean;
+  snoozedUntil?: string | null;
+  resurfacedFromSnooze?: boolean;
 }
 
 export type FeedTab = 'action_required' | 'fyi' | 'ignore';

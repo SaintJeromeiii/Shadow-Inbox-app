@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef } from 'react';
 import {
   Animated,
+  Alert,
+  Pressable,
   PanResponder,
   StyleSheet,
   Text,
@@ -8,6 +10,7 @@ import {
   type LayoutChangeEvent,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
+import { Ionicons } from '@expo/vector-icons';
 import FeedCard, { type FeedCardProps } from './FeedCard';
 import type { InboxSwipeAction } from '../services/inboxSwipeStorage';
 import { arcadeColors, arcadeFonts } from '../theme/arcadeTheme';
@@ -23,11 +26,15 @@ interface SwipeableFeedCardProps extends FeedCardProps {
 }
 
 function actionLabel(action: InboxSwipeAction): string {
-  return action === 'archive' ? 'ARCHIVE' : 'TRASH';
+  return action === 'archive' ? 'ARCHIVE' : action === 'trash' ? 'TRASH' : 'SNOOZE';
 }
 
 function actionColor(action: InboxSwipeAction): string {
-  return action === 'archive' ? arcadeColors.neonCyan : arcadeColors.neonRed;
+  return action === 'archive'
+    ? arcadeColors.neonCyan
+    : action === 'trash'
+      ? arcadeColors.neonRed
+      : arcadeColors.neonYellow;
 }
 
 export default function SwipeableFeedCard({
@@ -36,6 +43,7 @@ export default function SwipeableFeedCard({
   swipeEnabled = true,
   onGmailArchive,
   onTrash,
+  onSnooze,
   notification,
   selectionMode,
   actionBusy,
@@ -93,11 +101,40 @@ export default function SwipeableFeedCard({
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       if (action === 'archive') {
         await onGmailArchive(notification);
-      } else {
-        await onTrash(notification);
+        return;
       }
+
+      if (action === 'trash') {
+        await onTrash(notification);
+        return;
+      }
+
+      const options = [
+        {
+          label: '3 hours',
+          date: new Date(Date.now() + 3 * 60 * 60 * 1000),
+        },
+        {
+          label: 'Tomorrow morning',
+          date: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        },
+        {
+          label: 'Next week',
+          date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        },
+      ];
+
+      Alert.alert('Snooze', 'Bring this back later.', [
+        { text: 'Cancel', style: 'cancel' },
+        ...options.map((option) => ({
+          text: option.label,
+          onPress: () => {
+            void onSnooze(notification, option.date.toISOString());
+          },
+        })),
+      ]);
     },
-    [notification, onGmailArchive, onTrash],
+    [notification, onGmailArchive, onSnooze, onTrash],
   );
 
   const runSwipeActionRef = useRef(runSwipeAction);
@@ -197,6 +234,8 @@ export default function SwipeableFeedCard({
         >
           {swipeRightAction === 'archive' ? (
             <ArcadeArchiveIcon size={22} color={arcadeColors.bgDeep} />
+          ) : swipeRightAction === 'snooze' ? (
+            <Ionicons name="time-outline" size={22} color={arcadeColors.bgDeep} />
           ) : (
             <ArcadeTrashIcon size={22} color={arcadeColors.bgDeep} />
           )}
@@ -215,6 +254,8 @@ export default function SwipeableFeedCard({
         >
           {swipeLeftAction === 'archive' ? (
             <ArcadeArchiveIcon size={22} color={arcadeColors.bgDeep} />
+          ) : swipeLeftAction === 'snooze' ? (
+            <Ionicons name="time-outline" size={22} color={arcadeColors.bgDeep} />
           ) : (
             <ArcadeTrashIcon size={22} color={arcadeColors.bgDeep} />
           )}

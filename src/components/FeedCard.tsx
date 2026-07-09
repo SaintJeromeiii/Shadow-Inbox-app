@@ -43,6 +43,7 @@ export interface FeedCardProps {
   onDraftChange: (id: string, text: string) => void;
   onGmailArchive: (notification: TriagedNotification) => Promise<void>;
   onTrash: (notification: TriagedNotification) => Promise<void>;
+  onSnooze: (notification: TriagedNotification, snoozedUntil: string) => Promise<void>;
   onSendReply: (
     notification: TriagedNotification,
     replyText: string,
@@ -84,6 +85,24 @@ function formatCalendarPreviewTime(iso: string): string {
   const date = new Date(iso);
   return date.toLocaleString([], {
     weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+function formatSnoozedUntil(iso: string | null | undefined): string | null {
+  if (!iso) {
+    return null;
+  }
+
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) {
+    return null;
+  }
+
+  return date.toLocaleString([], {
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
@@ -219,6 +238,7 @@ export default function FeedCard({
   onDraftChange,
   onGmailArchive,
   onTrash,
+  onSnooze,
   onSendReply,
   onRedraft,
   onVoiceCommand,
@@ -236,7 +256,7 @@ export default function FeedCard({
   const [voiceProcessing, setVoiceProcessing] = useState(false);
   const [selectedTone, setSelectedTone] = useState<ReplyTone>(DEFAULT_REPLY_TONE);
   const [isEditing, setIsEditing] = useState(false);
-  const [localAction, setLocalAction] = useState<'archive' | 'trash' | null>(null);
+  const [localAction, setLocalAction] = useState<'archive' | 'trash' | 'snooze' | null>(null);
   const [quickReplies, setQuickReplies] = useState<QuickReplyOptions | null>(null);
   const [loadingQuickReplies, setLoadingQuickReplies] = useState(false);
   const [quickReplyModalVisible, setQuickReplyModalVisible] = useState(false);
@@ -283,6 +303,7 @@ export default function FeedCard({
   const isEmail = notification.sourceApp === 'Email';
   const attachmentLabels = notification.attachmentScan?.labels ?? [];
   const remembersPastThread = notification.memoryContext?.injected === true;
+  const snoozedLabel = formatSnoozedUntil(notification.snoozedUntil);
   const calendarGuard = notification.calendarGuard;
   const showCalendarGuard =
     calendarGuard?.checked === true && Boolean(calendarGuard.proposedWindow);
@@ -471,6 +492,42 @@ export default function FeedCard({
     }
   };
 
+  const handleQuickSnooze = () => {
+    if (busy) return;
+
+    const options = [
+      {
+        label: '3 hours',
+        date: new Date(Date.now() + 3 * 60 * 60 * 1000),
+      },
+      {
+        label: 'Tomorrow morning',
+        date: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      },
+      {
+        label: 'Next week',
+        date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      },
+    ];
+
+    Alert.alert('Snooze', 'Bring this back later.', [
+      { text: 'Cancel', style: 'cancel' },
+      ...options.map((option) => ({
+        text: option.label,
+        onPress: () => {
+          void (async () => {
+            setLocalAction('snooze');
+            try {
+              await onSnooze(notification, option.date.toISOString());
+            } finally {
+              setLocalAction(null);
+            }
+          })();
+        },
+      })),
+    ]);
+  };
+
   const stopCardPress = (event?: { stopPropagation?: () => void }) => {
     event?.stopPropagation?.();
   };
@@ -627,13 +684,50 @@ export default function FeedCard({
         {triage?.cleanSummary ?? 'Awaiting triage…'}
       </Text>
 
+      {triage?.reasonLabel ? (
+        <View style={styles.reasonPill}>
+          <Text style={styles.reasonPillText}>WHY: {triage.reasonLabel}</Text>
+        </View>
+      ) : null}
+
+      {notification.resurfacedFromSnooze ? (
+        <View style={styles.resurfacedPill}>
+          <Text style={styles.resurfacedPillText}>BACK FROM SNOOZE</Text>
+        </View>
+      ) : null}
+
       <View style={styles.metaRow}>
         <Ionicons name="time-outline" size={12} color="#5C6478" />
         <Text style={styles.timestamp}>{formatTimestamp(notification.timestamp)}</Text>
+        {snoozedLabel ? (
+          <>
+            <Text style={styles.metaDivider}>•</Text>
+            <Text style={styles.snoozedText}>Snoozed until {snoozedLabel}</Text>
+          </>
+        ) : null}
       </View>
 
       {isEmail && !selectionMode && (
         <View style={styles.quickActions}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.quickActionButton,
+              pressed && !busy && styles.quickActionPressed,
+              busy && styles.quickActionDisabled,
+            ]}
+            onPress={(e) => {
+              stopCardPress(e);
+              handleQuickSnooze();
+            }}
+            disabled={busy}
+            accessibilityLabel="Snooze email"
+          >
+            {localAction === 'snooze' ? (
+              <ActivityIndicator size="small" color={arcadeColors.neonYellow} />
+            ) : (
+              <Ionicons name="time-outline" size={18} color={arcadeColors.neonYellow} />
+            )}
+          </Pressable>
           <Pressable
             style={({ pressed }) => [
               styles.quickActionButton,
@@ -1214,11 +1308,54 @@ const styles = StyleSheet.create({
   metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: 6,
     marginTop: 12,
   },
+  metaDivider: {
+    color: '#5C6478',
+    fontSize: 12,
+  },
   timestamp: {
     ...arcadeTypography.retroMeta,
+  },
+  snoozedText: {
+    color: arcadeColors.neonYellow,
+    fontSize: 11,
+    fontFamily: arcadeFonts.body,
+    fontWeight: '700',
+  },
+  reasonPill: {
+    alignSelf: 'flex-start',
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 224, 102, 0.32)',
+    backgroundColor: 'rgba(255, 224, 102, 0.10)',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  reasonPillText: {
+    color: arcadeColors.neonYellow,
+    fontSize: 10,
+    fontFamily: arcadeFonts.pixel,
+    lineHeight: 12,
+  },
+  resurfacedPill: {
+    alignSelf: 'flex-start',
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(102, 255, 153, 0.36)',
+    backgroundColor: 'rgba(102, 255, 153, 0.10)',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  resurfacedPillText: {
+    color: arcadeColors.neonGreen,
+    fontSize: 10,
+    fontFamily: arcadeFonts.pixel,
+    lineHeight: 12,
   },
   quickActions: {
     flexDirection: 'row',
