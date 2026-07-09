@@ -7,11 +7,12 @@ import {
   arcadeFonts,
   arcadeTypography,
 } from '../theme/arcadeTheme';
-import { ArcadeArchiveIcon, ArcadeTrashIcon } from './ArcadeIcons';
+import { ArcadeArchiveIcon, ArcadeComputerIcon, ArcadeTrashIcon } from './ArcadeIcons';
 import { MailSorterDeluxeGame } from './MailSorterDeluxeModal';
+import NeonPostOfficeTycoonGame from './NeonPostOfficeTycoonGame';
 import StampSmashGame from './StampSmashGame';
 
-type BonusScreen = 'picker' | 'mail_sorter' | 'stamp_smash';
+type BonusScreen = 'picker' | 'mail_sorter' | 'stamp_smash' | 'post_office_tycoon';
 
 interface InboxZeroBonusHubProps {
   visible: boolean;
@@ -36,6 +37,12 @@ const GAME_CARDS: Array<{
     subtitle: 'Whack-a-spam: stamp junk before it disappears.',
     accent: arcadeColors.neonPink,
   },
+  {
+    id: 'post_office_tycoon',
+    title: 'NEON POST OFFICE TYCOON',
+    subtitle: 'Run the queue across scan, sort, stamp, and ship stations.',
+    accent: arcadeColors.neonGreen,
+  },
 ];
 
 export default function InboxZeroBonusHub({ visible, onClose }: InboxZeroBonusHubProps) {
@@ -54,7 +61,9 @@ export default function InboxZeroBonusHub({ visible, onClose }: InboxZeroBonusHu
       ? 'BONUS STAGE ARCADE'
       : screen === 'mail_sorter'
         ? 'MAIL SORTER DELUXE'
-        : 'STAMP SMASH';
+        : screen === 'stamp_smash'
+          ? 'STAMP SMASH'
+          : 'NEON POST OFFICE TYCOON';
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
@@ -99,6 +108,8 @@ export default function InboxZeroBonusHub({ visible, onClose }: InboxZeroBonusHu
                 <View style={styles.gameCardTop}>
                   {game.id === 'mail_sorter' ? (
                     <ArcadeArchiveIcon size={22} color={game.accent} />
+                  ) : game.id === 'post_office_tycoon' ? (
+                    <ArcadeComputerIcon size={22} color={game.accent} />
                   ) : (
                     <ArcadeTrashIcon size={22} color={game.accent} />
                   )}
@@ -119,6 +130,10 @@ export default function InboxZeroBonusHub({ visible, onClose }: InboxZeroBonusHu
 
         {screen === 'stamp_smash' ? (
           <StampSmashGame onBackToHub={() => setScreen('picker')} />
+        ) : null}
+
+        {screen === 'post_office_tycoon' ? (
+          <NeonPostOfficeTycoonGame onBackToHub={() => setScreen('picker')} />
         ) : null}
       </SafeAreaView>
     </Modal>
