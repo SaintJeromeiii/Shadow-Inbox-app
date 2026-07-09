@@ -7,12 +7,18 @@ import {
   arcadeFonts,
   arcadeTypography,
 } from '../theme/arcadeTheme';
-import { ArcadeArchiveIcon, ArcadeComputerIcon, ArcadeTrashIcon } from './ArcadeIcons';
+import { ArcadeArchiveIcon, ArcadeComputerIcon, ArcadeRadarIcon, ArcadeTrashIcon } from './ArcadeIcons';
 import { MailSorterDeluxeGame } from './MailSorterDeluxeModal';
 import NeonPostOfficeTycoonGame from './NeonPostOfficeTycoonGame';
+import PulseCourierControlGame from './PulseCourierControlGame';
 import StampSmashGame from './StampSmashGame';
 
-type BonusScreen = 'picker' | 'mail_sorter' | 'stamp_smash' | 'post_office_tycoon';
+type BonusScreen =
+  | 'picker'
+  | 'mail_sorter'
+  | 'stamp_smash'
+  | 'post_office_tycoon'
+  | 'pulse_courier_control';
 
 interface InboxZeroBonusHubProps {
   visible: boolean;
@@ -43,6 +49,12 @@ const GAME_CARDS: Array<{
     subtitle: 'Run the queue across scan, sort, stamp, and ship stations.',
     accent: arcadeColors.neonGreen,
   },
+  {
+    id: 'pulse_courier_control',
+    title: 'PULSE COURIER CONTROL',
+    subtitle: 'Choose the route, then dispatch on beat before the network jams.',
+    accent: arcadeColors.neonYellow,
+  },
 ];
 
 export default function InboxZeroBonusHub({ visible, onClose }: InboxZeroBonusHubProps) {
@@ -63,7 +75,9 @@ export default function InboxZeroBonusHub({ visible, onClose }: InboxZeroBonusHu
         ? 'MAIL SORTER DELUXE'
         : screen === 'stamp_smash'
           ? 'STAMP SMASH'
-          : 'NEON POST OFFICE TYCOON';
+          : screen === 'post_office_tycoon'
+            ? 'NEON POST OFFICE TYCOON'
+            : 'PULSE COURIER CONTROL';
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
@@ -108,6 +122,8 @@ export default function InboxZeroBonusHub({ visible, onClose }: InboxZeroBonusHu
                 <View style={styles.gameCardTop}>
                   {game.id === 'mail_sorter' ? (
                     <ArcadeArchiveIcon size={22} color={game.accent} />
+                  ) : game.id === 'pulse_courier_control' ? (
+                    <ArcadeRadarIcon size={22} color={game.accent} />
                   ) : game.id === 'post_office_tycoon' ? (
                     <ArcadeComputerIcon size={22} color={game.accent} />
                   ) : (
@@ -134,6 +150,10 @@ export default function InboxZeroBonusHub({ visible, onClose }: InboxZeroBonusHu
 
         {screen === 'post_office_tycoon' ? (
           <NeonPostOfficeTycoonGame onBackToHub={() => setScreen('picker')} />
+        ) : null}
+
+        {screen === 'pulse_courier_control' ? (
+          <PulseCourierControlGame onBackToHub={() => setScreen('picker')} />
         ) : null}
       </SafeAreaView>
     </Modal>
