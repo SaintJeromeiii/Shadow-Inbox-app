@@ -10,8 +10,10 @@ function getOperatorAccountKeys() {
 }
 
 function isOperatorAccountKey(accountKey) {
+  const raw = String(accountKey || 'personal').trim().toLowerCase();
   const resolved = resolveAccountKey(accountKey || 'personal');
-  return getOperatorAccountKeys().has(resolved);
+  const operatorKeys = getOperatorAccountKeys();
+  return operatorKeys.has(raw) || operatorKeys.has(resolved);
 }
 
 function getAccountKeyFromAdminRequest(req) {

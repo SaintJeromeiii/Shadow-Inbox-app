@@ -57,11 +57,12 @@ Capture on a dark-theme device (1080×1920 or store-required sizes):
 4. **Intel Deck** — executive briefing
 5. **Settings** — AI status + profile
 
-## Release notes (1.0.0)
+## Release notes (template — customize per build)
 
 - Gmail connect + AI triage on sync
-- Quick replies and tone redrafts
-- Daily goals, streaks, and fighter progression
+- Snooze, undo, and “why this matters” reason labels
+- Quick replies and tone-aware redrafts
+- Daily goals, streaks, and Inbox Zero bonus arcade
 - Server-side AI with daily usage limits
 - Privacy policy and onboarding flow
 

@@ -36,6 +36,29 @@ export function wrapRootComponent<T>(component: T): T {
   }
 }
 
+export function isErrorReportingReady(): boolean {
+  return sentryReady;
+}
+
+export function hasErrorReportingDsn(): boolean {
+  return Boolean(process.env.EXPO_PUBLIC_SENTRY_DSN?.trim());
+}
+
+export function sendSentryTestEvent(): 'sent' | 'not_configured' | 'not_ready' {
+  if (!hasErrorReportingDsn()) {
+    return 'not_configured';
+  }
+
+  if (!sentryReady) {
+    return 'not_ready';
+  }
+
+  captureException(new Error('Shadow Inbox Sentry release test'), {
+    source: 'settings_test_button',
+  });
+  return 'sent';
+}
+
 export function captureException(error: unknown, context?: Record<string, unknown>): void {
   if (!sentryReady) {
     console.error('[Shadow Inbox]', error, context ?? '');

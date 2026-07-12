@@ -1,4 +1,4 @@
-const { getAccount, resolveAccountKey } = require('../accounts');
+const { getAccount, resolveSystemAccountKey } = require('../accounts');
 const {
   getValidAccessToken,
   refreshAccessToken,
@@ -12,11 +12,11 @@ const { getOAuthAccount } = require('../userTokens');
  * Refreshes automatically when the token is missing, expired, or within the buffer window.
  */
 async function ensureGmailAccessToken(accountKey) {
-  const resolvedKey = resolveAccountKey(accountKey);
+  const resolvedKey = resolveSystemAccountKey(accountKey);
   const account = getOAuthAccount(resolvedKey);
 
   if (!account) {
-    throw new Error(`OAuth account not found: ${resolvedKey}`);
+    throw new Error(`OAuth account not found: ${resolvedKey || accountKey}`);
   }
 
   if (!needsAccessTokenRefresh(account)) {
@@ -44,7 +44,7 @@ async function ensureGmailAccessToken(accountKey) {
  * Builds Gmail IMAP OAuth config after validating or refreshing the access token.
  */
 async function getGmailImapAuthConfig(accountKey) {
-  const account = getAccount(resolveAccountKey(accountKey));
+  const account = getAccount(resolveSystemAccountKey(accountKey));
   if (!account) {
     throw new Error(`Unknown account key: ${accountKey}`);
   }

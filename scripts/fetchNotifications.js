@@ -11,7 +11,7 @@
 require('dotenv').config();
 
 const { simpleParser } = require('mailparser');
-const { getAccount, resolveAccountKey } = require('../backend/accounts');
+const { getAccount, resolveSystemAccountKey } = require('../backend/accounts');
 const { readNotifications, writeNotifications } = require('../backend/notificationFeed');
 const { openInbox } = require('../backend/imapAuth');
 const { enrichNotifications, mergeNotification } = require('../backend/notificationEnrichment');
@@ -311,7 +311,8 @@ async function parseMessage(buffer, uid, meta = {}) {
  * @param {{ accountKey?: string, silent?: boolean }} options
  */
 async function fetchNotifications(options = {}) {
-  const accountKey = resolveAccountKey(options.accountKey || 'personal');
+  // System resolver: daemon polls have no x-device-id / request scope.
+  const accountKey = resolveSystemAccountKey(options.accountKey || 'personal');
   const { silent = false } = options;
   const account = getAccount(accountKey);
 

@@ -17,6 +17,9 @@ Run on a **physical device** with a production or preview build (`npx expo run:a
 - [ ] **Quick replies** generate three options
 - [ ] Edit draft → **Redraft** with a tone — draft updates
 - [ ] **Archive** or **Trash** — message leaves inbox, XP updates
+- [ ] **Undo** bar (~5s) — undo restores message before Gmail sync
+- [ ] **Snooze** (button or swipe) — message hidden; **Snoozed** chip shows it
+- [ ] Reason labels visible on triaged cards (e.g. Billing, Reply needed)
 - [ ] Daily goal / streak banner updates after clearing mail
 
 ## Intel & briefing
@@ -81,7 +84,7 @@ chmod +x scripts/verify-no-client-openai.sh
 
 ## Beta release
 
-See **`docs/beta-release.md`** and **`docs/supabase-migrations.md`** before shipping to waitlist testers.
+See **`docs/RELEASE_READINESS.md`** (master checklist), **`docs/beta-release.md`**, and **`docs/supabase-migrations.md`** before shipping to waitlist testers.
 
 ## Sign-off
 

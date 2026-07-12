@@ -1,15 +1,16 @@
-const { getAccount, resolveAccountKey } = require('./accounts');
+const { getAccount, resolveSystemAccountKey } = require('./accounts');
 const { getValidAccessToken } = require('./googleOAuth');
 
 const GMAIL_API_BASE = 'https://gmail.googleapis.com/gmail/v1/users/me';
 
 async function gmailApiRequest(accountKey, path, options = {}) {
-  const account = getAccount(resolveAccountKey(accountKey));
+  const resolvedKey = resolveSystemAccountKey(accountKey);
+  const account = getAccount(resolvedKey);
   if (!account?.oauth) {
     throw new Error(`Gmail API is only available for linked Google accounts (${accountKey}).`);
   }
 
-  const accessToken = await getValidAccessToken(accountKey);
+  const accessToken = await getValidAccessToken(resolvedKey);
   const response = await fetch(`${GMAIL_API_BASE}${path}`, {
     ...options,
     headers: {
@@ -105,7 +106,7 @@ async function sendGmailMessage(accountKey, {
   references = null,
   gmailApiMessageId = null,
 }) {
-  const account = getAccount(resolveAccountKey(accountKey));
+  const account = getAccount(resolveSystemAccountKey(accountKey));
   if (!account?.oauth) {
     throw new Error(`Gmail API send requires a linked Google account (${accountKey}).`);
   }

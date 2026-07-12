@@ -26,7 +26,7 @@ const COLUMN_BY_TYPE = {
 const EXEMPT_ACCOUNT_KEYS = new Set(
   String(process.env.AI_LIMIT_EXEMPT_ACCOUNT_KEYS || 'personal')
     .split(',')
-    .map((value) => resolveAccountKey(value.trim()))
+    .map((value) => value.trim().toLowerCase())
     .filter(Boolean),
 );
 
@@ -58,7 +58,9 @@ function writeLocalStore(store) {
 }
 
 function isQuotaExempt(accountKey) {
-  return EXEMPT_ACCOUNT_KEYS.has(resolveAccountKey(accountKey));
+  const raw = String(accountKey || '').trim().toLowerCase();
+  const resolved = resolveAccountKey(accountKey);
+  return EXEMPT_ACCOUNT_KEYS.has(raw) || EXEMPT_ACCOUNT_KEYS.has(resolved);
 }
 
 function buildBucket(used, limit) {

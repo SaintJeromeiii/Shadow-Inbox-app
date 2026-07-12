@@ -1,9 +1,9 @@
 const fs = require('fs');
-const { getAccount, resolveAccountKey } = require('./accounts');
+const { getAccount, resolveSystemAccountKey } = require('./accounts');
 const { getSupabase, isSupabaseEnabled } = require('./supabaseClient');
 
 function getFeedPath(accountKey) {
-  const account = getAccount(resolveAccountKey(accountKey));
+  const account = getAccount(resolveSystemAccountKey(accountKey));
   if (!account) {
     throw new Error(`Unknown account key: ${accountKey}`);
   }
@@ -38,7 +38,7 @@ function toNotificationRow(accountKey, notification) {
   const timestamp = notification.timestamp || new Date().toISOString();
   return {
     id: notification.id,
-    account_key: resolveAccountKey(accountKey),
+    account_key: resolveSystemAccountKey(accountKey),
     payload: notification,
     sort_timestamp: timestamp,
     updated_at: new Date().toISOString(),
@@ -46,7 +46,7 @@ function toNotificationRow(accountKey, notification) {
 }
 
 async function readNotifications(accountKey = 'personal') {
-  const resolvedKey = resolveAccountKey(accountKey);
+  const resolvedKey = resolveSystemAccountKey(accountKey);
   const supabase = getSupabase();
 
   if (supabase) {
@@ -67,7 +67,7 @@ async function readNotifications(accountKey = 'personal') {
 }
 
 async function writeNotifications(accountKey, notifications) {
-  const resolvedKey = resolveAccountKey(accountKey);
+  const resolvedKey = resolveSystemAccountKey(accountKey);
   const supabase = getSupabase();
 
   if (supabase) {
@@ -103,7 +103,7 @@ async function writeNotifications(accountKey, notifications) {
 }
 
 async function removeNotificationIds(accountKey, ids) {
-  const resolvedKey = resolveAccountKey(accountKey);
+  const resolvedKey = resolveSystemAccountKey(accountKey);
   const idSet = new Set(ids);
   const current = await readNotifications(resolvedKey);
   const filtered = current.filter((item) => !idSet.has(item.id));

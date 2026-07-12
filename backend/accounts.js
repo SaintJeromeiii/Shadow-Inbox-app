@@ -183,6 +183,22 @@ function resolveAccountKey(raw, options = {}) {
   return publicKeys[0] ?? (shouldExposeBuiltinAccounts() ? key : '');
 }
 
+/**
+ * Resolve an account key for background jobs (daemon, token refresh, Gmail API).
+ * Unlike resolveAccountKey(), this does not depend on request device scope — so cloud
+ * polling still works when no x-device-id is present.
+ */
+function resolveSystemAccountKey(raw) {
+  const key = String(raw || '').trim().toLowerCase();
+  if (key && (ACCOUNT_DEFINITIONS[key] || getOAuthAccount(key))) {
+    return key;
+  }
+
+  return resolveAccountKey(raw, {
+    authorizedAccountKeys: listAccountKeys(),
+  });
+}
+
 function normalizeAccountEmail(email) {
   return String(email || '').trim().toLowerCase();
 }
@@ -223,6 +239,7 @@ module.exports = {
   listAccountKeys,
   listPublicAccountKeys,
   resolveAccountKey,
+  resolveSystemAccountKey,
   resolveFinanceAccountKeys,
   shouldExposeBuiltinAccounts,
 };

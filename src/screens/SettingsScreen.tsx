@@ -34,6 +34,11 @@ import {
 } from '../services/inboxSwipeStorage';
 import { refreshTriageMode, getTriageMode } from '../services/triageService';
 import { fetchAiUsage, type AiUsageSummary } from '../services/aiUsageService';
+import {
+  hasErrorReportingDsn,
+  isErrorReportingReady,
+  sendSentryTestEvent,
+} from '../services/errorReporting';
 import type { UserProfile } from '../types/userProfile';
 import { arcadeColors, arcadeFonts } from '../theme/arcadeTheme';
 
@@ -49,6 +54,30 @@ const SWIPE_ACTION_OPTIONS: InboxSwipeAction[] = ['archive', 'trash', 'snooze'];
 
 function formatSwipeActionLabel(action: InboxSwipeAction): string {
   return action === 'archive' ? 'ARCHIVE' : action === 'trash' ? 'TRASH' : 'SNOOZE';
+}
+
+function handleSendSentryTestEvent(): void {
+  const result = sendSentryTestEvent();
+  if (result === 'sent') {
+    Alert.alert(
+      'Test event sent',
+      'Check Sentry → Issues for "Shadow Inbox Sentry release test" within a minute.',
+    );
+    return;
+  }
+
+  if (result === 'not_configured') {
+    Alert.alert(
+      'Sentry not configured',
+      'Set EXPO_PUBLIC_SENTRY_DSN in EAS production env, then ship a new build.',
+    );
+    return;
+  }
+
+  Alert.alert(
+    'Sentry not ready',
+    'The DSN is set but Sentry did not initialize in this build. Reinstall the latest production build.',
+  );
 }
 
 export default function SettingsScreen({
@@ -256,6 +285,18 @@ export default function SettingsScreen({
                 )}
               </>
             ) : null}
+            {hasErrorReportingDsn() ? (
+              <>
+                <Text style={styles.metaText}>
+                  Crash reports: {isErrorReportingReady() ? 'Active (Sentry)' : 'DSN set, not initialized'}
+                </Text>
+                <Pressable style={styles.secondaryButton} onPress={handleSendSentryTestEvent}>
+                  <Text style={styles.secondaryButtonText}>SEND SENTRY TEST EVENT</Text>
+                </Pressable>
+              </>
+            ) : (
+              <Text style={styles.metaText}>Crash reports: Not configured in this build</Text>
+            )}
           </View>
 
           <View style={styles.card}>

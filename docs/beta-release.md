@@ -1,5 +1,7 @@
 # Android Beta Release
 
+**Master checklist:** [RELEASE_READINESS.md](./RELEASE_READINESS.md)
+
 ## Prerequisites
 
 - [ ] Production smoke test passes: `npm run smoke:production`
