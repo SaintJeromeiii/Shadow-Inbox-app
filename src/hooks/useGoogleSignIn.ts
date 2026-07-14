@@ -128,7 +128,11 @@ export function useGoogleSignIn(options: UseGoogleSignInOptions = {}) {
         return;
       }
 
+      // Always revoke/sign out first so Google issues a fresh refresh token
+      // (especially important while OAuth consent screen is in Testing — tokens expire ~7 days).
+      await resetGoogleSessionForFreshAuthCode();
       let serverAuthCode = await requestGoogleServerAuthCode();
+
       if (!serverAuthCode) {
         await resetGoogleSessionForFreshAuthCode();
         serverAuthCode = await requestGoogleServerAuthCode();

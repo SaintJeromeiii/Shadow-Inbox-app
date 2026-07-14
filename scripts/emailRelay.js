@@ -434,11 +434,26 @@ app.post('/api/auth/google/callback', async (req, res) => {
 });
 
 app.get('/api/emails', async (req, res) => {
+  const requestedKey = String(
+    req.headers['x-account-key'] || req.query?.accountKey || req.body?.accountKey || '',
+  ).trim();
   const accountKey = getAccountKeyFromRequest(req);
   const shouldSync = req.query.sync === 'true' || req.query.sync === '1';
   const SYNC_BUDGET_MS = 55_000;
 
   try {
+    const account = accountKey ? getAccount(accountKey) : null;
+    if (!account) {
+      console.warn(
+        `[Relay] GET /api/emails denied — requested "${requestedKey || '(none)'}" resolved to "${accountKey || ''}" for device ${getDeviceIdFromRequest(req).slice(0, 8) || '(none)'}…`,
+      );
+      res.status(401).json({
+        error:
+          'This Gmail inbox is not linked to this device. Open Settings and Connect / Switch Gmail again.',
+      });
+      return;
+    }
+
     let syncStats = null;
 
     if (shouldSync) {
@@ -461,7 +476,6 @@ app.get('/api/emails', async (req, res) => {
     }
 
     const notifications = await readNotifications(accountKey);
-    const account = getAccount(accountKey);
 
     res.status(200).json({
       accountKey,

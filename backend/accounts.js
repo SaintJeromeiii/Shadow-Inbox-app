@@ -159,6 +159,7 @@ function listAccounts(options = {}) {
 function resolveAccountKey(raw, options = {}) {
   const key = String(raw || 'personal').trim().toLowerCase();
   const publicKeys = listPublicAccountKeys(options);
+  const isKnownAccount = Boolean(key && (ACCOUNT_DEFINITIONS[key] || getOAuthAccount(key)));
 
   if (publicKeys.includes(key)) {
     return key;
@@ -168,16 +169,14 @@ function resolveAccountKey(raw, options = {}) {
     return publicKeys[0] ?? (shouldExposeBuiltinAccounts() ? 'personal' : '');
   }
 
+  // Known OAuth/builtin key outside this device/request scope: never remap to another inbox.
+  // Callers should treat '' as unauthorized / missing for that requested account.
+  if (isKnownAccount) {
+    return '';
+  }
+
   if (publicKeys.length === 1) {
     return publicKeys[0];
-  }
-
-  if (shouldEnforceDeviceAuth() && (ACCOUNT_DEFINITIONS[key] || getOAuthAccount(key))) {
-    return publicKeys[0] ?? '';
-  }
-
-  if (ACCOUNT_DEFINITIONS[key] || getOAuthAccount(key)) {
-    return publicKeys[0] ?? (shouldExposeBuiltinAccounts() ? key : '');
   }
 
   return publicKeys[0] ?? (shouldExposeBuiltinAccounts() ? key : '');

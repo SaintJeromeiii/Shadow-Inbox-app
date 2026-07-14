@@ -22,6 +22,7 @@ console.log(
 );
 
 const POLL_INTERVAL_CRON = '*/2 * * * *';
+const ACCOUNT_FETCH_TIMEOUT_MS = 90_000;
 let isRunning = false;
 
 function formatTimestamp() {
@@ -30,6 +31,15 @@ function formatTimestamp() {
     minute: '2-digit',
     second: '2-digit',
   });
+}
+
+function withTimeout(promise, timeoutMs, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+    }),
+  ]);
 }
 
 async function refreshOAuthTokensForPolling() {
@@ -61,12 +71,21 @@ async function runCheck(trigger = 'scheduled') {
     await refreshOAuthTokensForPolling();
 
     for (const accountKey of listAccountKeys()) {
-      const stats = await fetchNotifications({ accountKey, silent: true });
-      const updateLabel = stats.newCount === 1 ? 'update' : 'updates';
+      try {
+        const stats = await withTimeout(
+          fetchNotifications({ accountKey, silent: true }),
+          ACCOUNT_FETCH_TIMEOUT_MS,
+          `[Daemon][${accountKey}] fetch`,
+        );
+        const updateLabel = stats.newCount === 1 ? 'update' : 'updates';
 
-      console.log(
-        `[Daemon][${accountKey}] ${stats.unreadTotal} unread — ${stats.newCount} new ${updateLabel}, ${stats.writtenCount} in feed.`,
-      );
+        console.log(
+          `[Daemon][${accountKey}] ${stats.unreadTotal} unread — ${stats.newCount} new ${updateLabel}, ${stats.writtenCount} in feed.`,
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`[Daemon][${accountKey}] Fetch failed: ${message}`);
+      }
     }
 
     const discordStats = await pollDiscordChannels();

@@ -2,6 +2,7 @@ const {
   getOAuthAccount,
   upsertOAuthAccount,
   updateOAuthTokens,
+  clearOAuthRefreshToken,
 } = require('./userTokens');
 const {
   GOOGLE_OAUTH_SCOPES,
@@ -168,7 +169,19 @@ async function refreshAccessToken(accountKey) {
 
   const payload = await response.json();
   if (!response.ok) {
-    throw new Error(payload.error_description || payload.error || 'Google token refresh failed.');
+    const detail = payload.error_description || payload.error || 'Google token refresh failed.';
+    const revoked =
+      payload.error === 'invalid_grant' ||
+      /expired|revoked|invalid_grant/i.test(String(detail));
+
+    if (revoked) {
+      clearOAuthRefreshToken(accountKey, detail);
+      throw new Error(
+        `Token has been expired or revoked. Re-link ${account.email} in Settings → Connect / Switch Gmail.`,
+      );
+    }
+
+    throw new Error(detail);
   }
 
   return updateOAuthTokens(accountKey, {
@@ -236,6 +249,13 @@ async function completeGoogleOAuth({
     throw new Error('Google profile did not include an email address.');
   }
 
+  if (!payload.refresh_token) {
+    console.warn(
+      `[GoogleOAuth] Google did not return a refresh_token for ${profile.email}. ` +
+        'Existing token will be kept if present; reconnect with consent if sync fails.',
+    );
+  }
+
   const saved = upsertOAuthAccount({
     email: profile.email,
     displayName: profile.name,
@@ -247,6 +267,13 @@ async function completeGoogleOAuth({
     oauthRedirectUri: redirectUri,
     oauthClientType: client.clientType,
   });
+
+  if (!saved.refreshToken) {
+    throw new Error(
+      `Google linked ${profile.email} without a refresh token. ` +
+        'Revoke Shadow Inbox at myaccount.google.com/permissions, then Connect Gmail again.',
+    );
+  }
 
   if (!accountHasCalendarScope(saved)) {
     console.warn(

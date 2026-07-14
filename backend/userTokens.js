@@ -184,6 +184,7 @@ function upsertOAuthAccount({
     oauthClientId: oauthClientId || existing?.oauthClientId || null,
     oauthRedirectUri: oauthRedirectUri || existing?.oauthRedirectUri || null,
     oauthClientType: oauthClientType || existing?.oauthClientType || 'android',
+    authError: null,
     addedAt: existing?.addedAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -206,6 +207,26 @@ function updateOAuthTokens(accountKey, { accessToken, refreshToken, expiresIn, s
     refreshToken: refreshToken || existing.refreshToken,
     expiresAt: Date.now() + Number(expiresIn || 3600) * 1000,
     scope: scope || existing.scope,
+    updatedAt: new Date().toISOString(),
+  };
+
+  writeTokenStore(store);
+  return store.accounts[accountKey];
+}
+
+function clearOAuthRefreshToken(accountKey, reason = '') {
+  const store = readTokenStore();
+  const existing = store.accounts[accountKey];
+  if (!existing) {
+    return null;
+  }
+
+  store.accounts[accountKey] = {
+    ...existing,
+    refreshToken: null,
+    accessToken: null,
+    expiresAt: 0,
+    authError: reason || 'refresh_token_revoked',
     updatedAt: new Date().toISOString(),
   };
 
@@ -263,6 +284,7 @@ module.exports = {
   listOAuthAccounts,
   upsertOAuthAccount,
   updateOAuthTokens,
+  clearOAuthRefreshToken,
   removeOAuthAccount,
   toPublicProfile,
   hydrateOAuthTokenStore,
