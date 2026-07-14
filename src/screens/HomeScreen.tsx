@@ -238,6 +238,8 @@ export default function HomeScreen({
   const skipNextSave = useRef(true);
   const alertedActionIdsRef = useRef<Set<string>>(new Set());
   const loadingAccountRef = useRef<AccountKey | null>(null);
+  /** Which account the current `notifications` state belongs to. Prevents cross-account local cache clobber. */
+  const notificationsAccountRef = useRef<AccountKey | null>(null);
   const triageInFlightRef = useRef(false);
   const flatListRef = useRef<FlatList<TriagedNotification>>(null);
   const playerStatsRef = useRef<PlayerStats | null>(null);
@@ -583,7 +585,13 @@ export default function HomeScreen({
       loadingAccountRef.current = accountKey;
 
       const publishInbox = (merged: TriagedNotification[]) => {
+        // Drop stale publishes if the user switched accounts mid-reload.
+        if (loadingAccountRef.current !== accountKey) {
+          return merged;
+        }
+
         const normalized = normalizeSnoozedNotifications(merged);
+        notificationsAccountRef.current = accountKey;
         setNotifications(normalized);
         setDraftTexts(buildDraftMap(normalized));
         setRemovingIds(new Set());
@@ -598,10 +606,15 @@ export default function HomeScreen({
         if (!accountKey) {
           setSyncError(null);
           setSyncSummary(null);
+          notificationsAccountRef.current = null;
           return publishInbox([]);
         }
 
         const cachedRemote = await fetchRelayInboxSeed(accountKey, false);
+        if (loadingAccountRef.current !== accountKey) {
+          return [];
+        }
+
         const cachedSeed =
           cachedRemote.notifications.length > 0
             ? cachedRemote.notifications
@@ -617,6 +630,10 @@ export default function HomeScreen({
         }
 
         const syncedRemote = await fetchRelayInboxSeed(accountKey, true);
+        if (loadingAccountRef.current !== accountKey) {
+          return merged;
+        }
+
         applySyncSummary(syncedRemote);
         const syncedSeed =
           syncedRemote.notifications.length > 0
@@ -629,12 +646,14 @@ export default function HomeScreen({
         setActiveTab('action_required');
         const published = publishInbox(merged);
         const pending = published.filter((item) => !item.archived && !item.triage);
-        if (pending.length > 0) {
+        if (pending.length > 0 && loadingAccountRef.current === accountKey) {
           void runTriageOnNotifications(pending, { announce: false });
         }
         return published;
       } finally {
-        loadingAccountRef.current = null;
+        if (loadingAccountRef.current === accountKey) {
+          loadingAccountRef.current = null;
+        }
       }
     },
     [applySyncSummary, fetchRelayInboxSeed, reloadInboxFromSource, runTriageOnNotifications],
@@ -683,14 +702,22 @@ export default function HomeScreen({
     if (!accountReady || !isScreenFocused) return;
 
     if (!hasActiveAccount) {
+      notificationsAccountRef.current = null;
       setNotifications([]);
       setDraftTexts({});
+      setSearchQuery('');
+      setQuickFilter('all');
       setHydrated(true);
       setRefreshing(false);
       return;
     }
 
     let cancelled = false;
+    // Prevent persisting the previous account's feed under the newly selected account.
+    skipNextSave.current = true;
+    notificationsAccountRef.current = null;
+    setSearchQuery('');
+    setQuickFilter('all');
     setRefreshing(true);
 
     void applyInboxReload(activeAccount, true).finally(() => {
@@ -717,6 +744,7 @@ export default function HomeScreen({
 
   useEffect(() => {
     if (!hydrated || !activeAccount) return;
+    if (notificationsAccountRef.current !== activeAccount) return;
 
     if (skipNextSave.current) {
       skipNextSave.current = false;

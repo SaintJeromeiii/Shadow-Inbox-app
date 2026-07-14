@@ -39,6 +39,7 @@ const { applyShadowLabelsToNotification } = require('../backend/shadowLabels');
 const { writeNotifications } = require('../backend/notificationFeed');
 const { getOpenAiCircuitStatus } = require('../backend/openAiCircuitBreaker');
 const { consumeAiQuota, handleQuotaHttpError } = require('../backend/aiUsageService');
+const { redraftReply } = require('../backend/redraftService');
 const {
   registerDevicePushToken,
   removeDevicePushToken,
